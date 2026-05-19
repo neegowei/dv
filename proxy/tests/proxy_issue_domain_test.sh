@@ -38,7 +38,7 @@ ENV
 export PATH="$FAKE_BIN:$PATH"
 export DOCKER_CALLS="$TMP_DIR/docker-calls.log"
 export PROXY_ENV_FILE="$ENV_FILE"
-export PROXY_COMPOSE_FILE="$ROOT/docker-compose.proxy.yaml"
+export PROXY_COMPOSE_FILE="$ROOT/docker-compose.yaml"
 
 "$ROOT/scripts/proxy.sh" issue-domain app.example.test >/dev/null
 

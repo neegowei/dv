@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROXY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPOSE_FILE="${PROXY_COMPOSE_FILE:-$PROXY_ROOT/docker-compose.proxy.yaml}"
+COMPOSE_FILE="${PROXY_COMPOSE_FILE:-$PROXY_ROOT/docker-compose.yaml}"
 ENV_FILE="${PROXY_ENV_FILE:-$PROXY_ROOT/.env.proxy}"
 TEMPLATE_DIR="$PROXY_ROOT/templates"
 ENABLED_TEMPLATE_DIR="$PROXY_ROOT/templates-enabled"
