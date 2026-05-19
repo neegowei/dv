@@ -4,6 +4,9 @@ networks:
   internal:
     name: ${MINIO_NETWORK:-shared_minio}
     external: true
+  proxy:
+    name: ${PROXY_NETWORK:-shared_proxy}
+    external: true
 
 services:
   minio:
@@ -32,3 +35,4 @@ services:
       retries: 3
     networks:
       - internal
+      - proxy
