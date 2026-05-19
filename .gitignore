@@ -1,0 +1,30 @@
+# --- Secrets & environment (never commit to public repo) ---
+.env
+.env.*
+!.env.*.example
+!.env.example
+
+# --- Proxy: runtime nginx config (contains real domains / upstreams) ---
+proxy/conf.d-enabled/*.conf
+proxy/templates-enabled/
+
+# --- TLS / ACME (if ever copied locally) ---
+**/letsencrypt/
+**/certbot-www/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# --- Logs & local data ---
+*.log
+/data/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
