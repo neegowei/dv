@@ -1,0 +1,102 @@
+name: ${MONITOR_PROJECT_NAME:-shared-monitor}
+
+networks:
+  internal:
+    name: ${MONITOR_NETWORK:-shared_monitor}
+    external: true
+
+services:
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:latest}
+    restart: unless-stopped
+    env_file:
+      - ./.env.monitor
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${PROMETHEUS_DATA_DIR:-/data/prometheus}:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    networks:
+      - internal
+
+  loki:
+    image: ${LOKI_IMAGE:-grafana/loki:latest}
+    restart: unless-stopped
+    env_file:
+      - ./.env.monitor
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - ${LOKI_DATA_DIR:-/data/loki}:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - internal
+
+  promtail:
+    image: ${PROMTAIL_IMAGE:-grafana/promtail:latest}
+    restart: unless-stopped
+    env_file:
+      - ./.env.monitor
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - ${BASE_LOG_DIR:-/data/logs}:/var/log/apps:ro
+      - /var/log:/var/log/host:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - internal
+
+  tempo:
+    image: ${TEMPO_IMAGE:-grafana/tempo:latest}
+    restart: unless-stopped
+    env_file:
+      - ./.env.monitor
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
+    volumes:
+      - ./tempo/tempo-config.yml:/etc/tempo/tempo.yaml:ro
+      - ${TEMPO_DATA_DIR:-/data/tempo}:/var/tempo
+    command: -config.file=/etc/tempo/tempo.yaml
+    networks:
+      - internal
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:latest}
+    restart: unless-stopped
+    env_file:
+      - ./.env.monitor
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ${GRAFANA_DATA_DIR:-/data/grafana}:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - internal

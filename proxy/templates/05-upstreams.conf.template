@@ -1,0 +1,7 @@
+upstream myapp_web_upstream {
+    server ${WEB_UPSTREAM};
+}
+
+upstream myapp_admin_upstream {
+    server ${ADMIN_UPSTREAM};
+}

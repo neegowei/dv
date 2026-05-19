@@ -1,0 +1,14 @@
+# HTTPS mode: keep ACME challenges on HTTP and redirect normal traffic.
+server {
+    listen 80;
+    server_name ${DOMAIN_WWW} ${DOMAIN_HT};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}

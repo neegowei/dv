@@ -1,0 +1,35 @@
+name: ${RABBITMQ_PROJECT_NAME:-shared-rabbitmq}
+
+networks:
+  internal:
+    name: ${RABBITMQ_NETWORK:-shared_rabbitmq}
+    external: true
+
+services:
+  rabbitmq:
+    image: ${RABBITMQ_IMAGE:-rabbitmq:3-management}
+    restart: unless-stopped
+    env_file:
+      - ./.env.rabbitmq
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    volumes:
+      - ${RABBITMQ_DATA_DIR:-/data/rabbitmq}:/var/lib/rabbitmq
+    ports:
+      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_MGMT_PORT:-15672}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      internal:
+        aliases:
+          - rabbitmq
