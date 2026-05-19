@@ -1,0 +1,14 @@
+# HTTPS mode: ACME on HTTP, redirect infra domains to HTTPS.
+server {
+    listen 80;
+    server_name ${DOMAIN_MONITOR} ${DOMAIN_STORE} ${DOMAIN_ADMIN_STORE};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}

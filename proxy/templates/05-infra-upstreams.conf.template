@@ -1,0 +1,11 @@
+upstream grafana_upstream {
+    server ${GRAFANA_UPSTREAM};
+}
+
+upstream store_upstream {
+    server ${STORE_UPSTREAM};
+}
+
+upstream admin_store_upstream {
+    server ${ADMIN_STORE_UPSTREAM};
+}

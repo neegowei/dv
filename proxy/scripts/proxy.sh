@@ -14,6 +14,8 @@ usage() {
                     为单个域名单独申请证书，证书名同域名；不会切换 HTTPS 配置
   proxy.sh expand   使用 CERTBOT_DOMAINS 扩展已有证书，成功后 reload nginx
   proxy.sh renew    续期证书，成功后 reload nginx
+  proxy.sh enable-https
+                    启用基础设施 HTTPS 模板（一域一证）并 reload，不重新申请证书
   proxy.sh reload   重新渲染当前启用模板并 reload nginx
   proxy.sh test     重新渲染当前启用模板并执行 nginx -t
   proxy.sh ps       查看 proxy services 状态
@@ -154,6 +156,13 @@ case "$cmd" in
         ensure_env_file
         compose_cmd run --rm certbot renew --webroot -w /var/www/certbot
         reload_nginx
+        ;;
+    enable-https)
+        ensure_env_file
+        ensure_proxy_network
+        enable_infra_https_templates
+        reload_nginx
+        echo "基础设施 HTTPS 已启用（monitor / store / admin.store）。"
         ;;
     reload)
         ensure_env_file

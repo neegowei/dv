@@ -6,6 +6,25 @@ COMPOSE_FILE="${PROXY_COMPOSE_FILE:-$PROXY_ROOT/docker-compose.yaml}"
 ENV_FILE="${PROXY_ENV_FILE:-$PROXY_ROOT/.env.proxy}"
 TEMPLATE_DIR="$PROXY_ROOT/templates"
 ENABLED_TEMPLATE_DIR="$PROXY_ROOT/templates-enabled"
+RENDERED_CONF_DIR="$PROXY_ROOT/conf.d-enabled"
+
+# Keep in sync with infra / default nginx templates.
+ENVSUBST_VARS='$DOMAIN_WWW $DOMAIN_HT $DOMAIN_WWW_CERT_NAME $DOMAIN_HT_CERT_NAME $WEB_UPSTREAM $ADMIN_UPSTREAM $CERT_NAME $DOMAIN_MONITOR $DOMAIN_STORE $DOMAIN_ADMIN_STORE $DOMAIN_MONITOR_CERT_NAME $DOMAIN_STORE_CERT_NAME $DOMAIN_ADMIN_STORE_CERT_NAME $GRAFANA_UPSTREAM $STORE_UPSTREAM $ADMIN_STORE_UPSTREAM'
+
+copy_infra_upstreams() {
+    cp "$TEMPLATE_DIR/05-infra-upstreams.conf.template" "$ENABLED_TEMPLATE_DIR/"
+}
+
+copy_infra_http_templates() {
+    copy_infra_upstreams
+    cp "$TEMPLATE_DIR/10-http-infra.conf.template" "$ENABLED_TEMPLATE_DIR/"
+}
+
+copy_infra_https_templates() {
+    copy_infra_upstreams
+    cp "$TEMPLATE_DIR/10-http-redirect-infra.conf.template" "$ENABLED_TEMPLATE_DIR/"
+    cp "$TEMPLATE_DIR/20-https-infra.conf.template" "$ENABLED_TEMPLATE_DIR/"
+}
 
 compose_cmd() {
     if docker compose version >/dev/null 2>&1; then
@@ -59,6 +78,7 @@ enable_http_templates() {
     mkdir -p "$ENABLED_TEMPLATE_DIR"
     cp "$TEMPLATE_DIR/05-upstreams.conf.template" "$ENABLED_TEMPLATE_DIR/"
     cp "$TEMPLATE_DIR/10-http.conf.template" "$ENABLED_TEMPLATE_DIR/"
+    copy_infra_http_templates
 }
 
 enable_https_templates() {
@@ -67,21 +87,53 @@ enable_https_templates() {
     cp "$TEMPLATE_DIR/05-upstreams.conf.template" "$ENABLED_TEMPLATE_DIR/"
     cp "$TEMPLATE_DIR/10-http-redirect.conf.template" "$ENABLED_TEMPLATE_DIR/10-http.conf.template"
     cp "$TEMPLATE_DIR/20-https.conf.template" "$ENABLED_TEMPLATE_DIR/"
+    copy_infra_https_templates
+}
+
+enable_infra_https_templates() {
+    rm -rf "$ENABLED_TEMPLATE_DIR"
+    mkdir -p "$ENABLED_TEMPLATE_DIR"
+    copy_infra_https_templates
+}
+
+export_env_from_file() {
+  if [[ ! -f "$ENV_FILE" ]]; then
+    return 1
+  fi
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+}
+
+render_templates_on_host() {
+  local tpl out
+
+  if ! command -v envsubst >/dev/null 2>&1; then
+    echo "请安装 gettext（提供 envsubst 命令）。" >&2
+    return 1
+  fi
+
+  export_env_from_file
+  mkdir -p "$RENDERED_CONF_DIR"
+  rm -f "$RENDERED_CONF_DIR"/*.conf
+
+  for tpl in "$ENABLED_TEMPLATE_DIR"/*.template; do
+    [[ -e "$tpl" ]] || continue
+    out="$RENDERED_CONF_DIR/$(basename "$tpl" .template)"
+    envsubst "$ENVSUBST_VARS" <"$tpl" >"$out"
+  done
 }
 
 render_templates_in_nginx() {
-    compose_cmd exec nginx sh -c "set -eu; \
-        for tpl in /etc/nginx/templates/*.template; do \
-            [ -e \"\$tpl\" ] || continue; \
-            out=\"/etc/nginx/conf.d/\$(basename \"\$tpl\" .template)\"; \
-            envsubst '\${DOMAIN_WWW} \${DOMAIN_HT} \${DOMAIN_WWW_CERT_NAME} \${DOMAIN_HT_CERT_NAME} \${WEB_UPSTREAM} \${ADMIN_UPSTREAM} \${CERT_NAME}' < \"\$tpl\" > \"\$out\"; \
-        done; \
-        nginx -t"
+  render_templates_on_host
+  compose_cmd exec nginx nginx -t
 }
 
 reload_nginx() {
-    render_templates_in_nginx
-    compose_cmd exec nginx nginx -s reload
+  render_templates_on_host
+  compose_cmd exec nginx nginx -t
+  compose_cmd exec nginx nginx -s reload
 }
 
 certbot_domain_args() {
