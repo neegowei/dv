@@ -22,7 +22,7 @@ server {
 
 server {
     listen 80;
-    server_name ${DOMAIN_HT};
+    server_name ${DOMAIN_ADMIN};
 
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/certbot;

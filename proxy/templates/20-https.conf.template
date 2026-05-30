@@ -21,10 +21,10 @@ server {
 server {
     listen 443 ssl;
     http2 on;
-    server_name ${DOMAIN_HT};
+    server_name ${DOMAIN_ADMIN};
 
-    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_HT_CERT_NAME}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_HT_CERT_NAME}/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_ADMIN_CERT_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_ADMIN_CERT_NAME}/privkey.pem;
 
     location / {
         proxy_pass http://myapp_admin_upstream;

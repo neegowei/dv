@@ -32,7 +32,7 @@ CERTBOT_STAGING=0
 CERTBOT_DOMAINS=www.example.test admin.example.test
 CERT_NAME=www.example.test
 DOMAIN_WWW=www.example.test
-DOMAIN_HT=admin.example.test
+DOMAIN_ADMIN=admin.example.test
 ENV
 
 export PATH="$FAKE_BIN:$PATH"
@@ -56,4 +56,3 @@ if grep -F -- "-d www.example.test" "$DOCKER_CALLS" >/dev/null; then
     echo "expected issue-domain not to use CERTBOT_DOMAINS" >&2
     exit 1
 fi
-

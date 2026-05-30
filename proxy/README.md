@@ -61,7 +61,7 @@ conf.d-enabled/         # 渲染后的 nginx 配置（gitignore）
 | **一证多域** | 多个子域在同一张证书 | `issue` | `issue` 自动切换 | `expand` | `renew` |
 | **一域一证** | 各子域独立证书 | `issue-domain <域名>` | `enable-https` 或手动模板 + `reload` | 再 `issue-domain` | `renew` |
 
-默认 `templates/` 中的 **双站点** 模板面向 `DOMAIN_WWW` / `DOMAIN_HT`。基础设施三域名使用 `templates/*-infra*.template`（见下文）。
+默认 `templates/` 中的 **双站点** 模板面向 `DOMAIN_WWW` / `DOMAIN_ADMIN`。基础设施三域名使用 `templates/*-infra*.template`（见下文）。
 
 ## `proxy.sh` 命令一览
 
@@ -106,11 +106,11 @@ cd proxy
 
 | 变量 | 说明 |
 |------|------|
-| `DOMAIN_WWW` / `DOMAIN_HT` | 两个 `server_name` |
-| `DOMAIN_WWW_CERT_NAME` / `DOMAIN_HT_CERT_NAME` | HTTPS 证书目录名 |
+| `DOMAIN_WWW` / `DOMAIN_ADMIN` | 两个 `server_name` |
+| `DOMAIN_WWW_CERT_NAME` / `DOMAIN_ADMIN_CERT_NAME` | HTTPS 证书目录名 |
 | `WEB_UPSTREAM` / `ADMIN_UPSTREAM` | upstream（`host:port` 或 Docker alias） |
 | `CERT_NAME` | 一证多域时的证书名 |
-| `CERTBOT_DOMAINS` | SAN 列表；为空时用 `DOMAIN_WWW` + `DOMAIN_HT` |
+| `CERTBOT_DOMAINS` | SAN 列表；为空时用 `DOMAIN_WWW` + `DOMAIN_ADMIN` |
 | `CERTBOT_EMAIL` | Let's Encrypt 邮箱（必填） |
 | `CERTBOT_STAGING` | `1` 使用测试 CA |
 
@@ -188,9 +188,9 @@ CERTBOT_DOMAINS=www.example.com admin.example.com
 CERT_NAME=www.example.com
 
 DOMAIN_WWW=www.example.com
-DOMAIN_HT=admin.example.com
+DOMAIN_ADMIN=admin.example.com
 DOMAIN_WWW_CERT_NAME=www.example.com
-DOMAIN_HT_CERT_NAME=www.example.com
+DOMAIN_ADMIN_CERT_NAME=www.example.com
 
 WEB_UPSTREAM=myapp_web:80
 ADMIN_UPSTREAM=myapp_admin:8080

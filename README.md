@@ -85,6 +85,7 @@ sudo ./deploy-infra.sh init           # init-data + init-networks
 ## 文档
 
 - [proxy/README.md](proxy/README.md) — 证书策略、模板渲染、反代与运维命令
+- [WINDOWS.md](WINDOWS.md) — Windows 11 + Docker Desktop 使用说明
 
 ## 安全与仓库
 

@@ -41,7 +41,7 @@ domain_args() {
     domains_raw="$(env_value CERTBOT_DOMAINS "")"
 
     if [[ -z "$domains_raw" ]]; then
-        domains_raw="$(env_value DOMAIN_WWW "") $(env_value DOMAIN_HT "")"
+        domains_raw="$(env_value DOMAIN_WWW "") $(env_value DOMAIN_ADMIN "")"
     fi
 
     domains_raw="${domains_raw//,/ }"
@@ -66,7 +66,7 @@ case "$cmd" in
         CERTBOT_DOMAIN_ARGS=()
         domain_args
         if [[ "${#CERTBOT_DOMAIN_ARGS[@]}" -eq 0 ]]; then
-            echo "请在 $ENV_FILE 中设置 CERTBOT_DOMAINS 或 DOMAIN_WWW/DOMAIN_HT。" >&2
+            echo "请在 $ENV_FILE 中设置 CERTBOT_DOMAINS 或 DOMAIN_WWW/DOMAIN_ADMIN。" >&2
             exit 1
         fi
 
@@ -127,7 +127,7 @@ case "$cmd" in
         CERTBOT_DOMAIN_ARGS=()
         domain_args
         if [[ "${#CERTBOT_DOMAIN_ARGS[@]}" -eq 0 ]]; then
-            echo "请在 $ENV_FILE 中设置 CERTBOT_DOMAINS 或 DOMAIN_WWW/DOMAIN_HT。" >&2
+            echo "请在 $ENV_FILE 中设置 CERTBOT_DOMAINS 或 DOMAIN_WWW/DOMAIN_ADMIN。" >&2
             exit 1
         fi
 

@@ -4,6 +4,9 @@ networks:
   internal:
     name: ${MONITOR_NETWORK:-shared_monitor}
     external: true
+  proxy:
+    name: ${PROXY_NETWORK:-shared_proxy}
+    external: true
 
 services:
   prometheus:
@@ -56,7 +59,7 @@ services:
     volumes:
       - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
       - ${BASE_LOG_DIR:-/data/logs}:/var/log/apps:ro
-      - /var/log:/var/log/host:ro
+      - ${HOST_LOG_DIR:-/var/log}:/var/log/host:ro
     command: -config.file=/etc/promtail/config.yml
     networks:
       - internal
@@ -100,3 +103,4 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks:
       - internal
+      - proxy
