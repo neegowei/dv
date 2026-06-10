@@ -4,7 +4,7 @@
 
 本仓库中 proxy 与仓库根目录 [`deploy-infra.sh`](../deploy-infra.sh) 配合，为 db / monitor / minio 等基础设施提供统一公网入口。
 
-> **公开仓库**：`.env.proxy`、`conf.d-enabled/*.conf`、`templates-enabled/` 已加入根目录 `.gitignore`，仅保存在服务器。仓库内只提交 `templates/` 下的通用模板。
+> **公开仓库**：`.env.proxy`、`conf.d-enabled/*.conf`、`templates-enabled/` 已加入根目录 `.gitignore`，仅保存在服务器。仓库内只提交 `templates/` 下的通用 infra 模板与 `examples/` 下的接入示例。
 
 ## 架构说明
 
@@ -17,8 +17,8 @@
 ### 配置如何生效
 
 ```
-templates/              # 仓库内可版本化的模板（${DOMAIN_*} 占位符）
-    ↓  proxy.sh up / issue / enable-https 复制
+templates/              # 仓库内可版本化的 infra 模板（${DOMAIN_*} 占位符）
+    ↓  proxy.sh up / enable-https 复制；自定义站点手动追加
 templates-enabled/      # 当前启用的模板（gitignore，在服务器维护）
     ↓  proxy.sh reload / test（宿主机 envsubst，读取 .env.proxy）
 conf.d-enabled/         # 渲染后的 nginx 配置（gitignore）
@@ -27,6 +27,7 @@ conf.d-enabled/         # 渲染后的 nginx 配置（gitignore）
 ```
 
 - 模板在**宿主机**用 `envsubst` 渲染（需安装 `gettext` 包），避免在 `docker compose exec` 里展开 glob 等问题。
+- 渲染时自动扫描 `templates-enabled/*.template` 内的 `${VAR}` 占位符；nginx 自身的 `$host`、`$scheme`、`$request_uri` 等裸变量不会被替换。
 - **不要**把模板挂到镜像自带的 `/etc/nginx/templates`（官方 entrypoint 会占用该路径）。
 
 ## 文件说明
@@ -36,13 +37,15 @@ conf.d-enabled/         # 渲染后的 nginx 配置（gitignore）
 | `.env.proxy` | 否 | compose、域名、证书、upstream（在服务器创建） |
 | `docker-compose.yaml` | 是 | nginx + certbot；`conf.d-enabled` 挂载为 `conf.d` |
 | `nginx.conf` | 是 | 全局 nginx 配置 |
-| `templates/` | 是 | 可复用模板源文件 |
+| `templates/` | 是 | 默认 infra 模板源文件 |
 | `templates-enabled/` | 否 | 当前启用的 `.template` 副本 |
 | `conf.d-enabled/` | 否（仅 `.gitkeep`） | 渲染产物 `*.conf` |
 | `scripts/proxy.sh` | 是 | 启动、签证、HTTPS、reload 等 |
 | `scripts/lib-proxy.sh` | 是 | compose、模板复制、宿主机渲染 |
 | `tests/proxy_issue_domain_test.sh` | 是 | `issue-domain` 行为回归测试 |
+| `tests/proxy_template_behavior_test.sh` | 是 | 模板渲染与 `issue` / `up` 行为回归测试 |
 | `examples/p260507-network.override.yaml` | 是 | 项目接入 `shared_proxy` 的示例 |
+| `examples/frontend-backend/templates/` | 是 | 旧前端/后端双站点模板示例 |
 
 ## 前置条件
 
@@ -58,17 +61,17 @@ conf.d-enabled/         # 渲染后的 nginx 配置（gitignore）
 
 | 策略 | 适用场景 | 首次签发 | 启用 HTTPS 反代 | 新增子域名 | 续期 |
 |------|----------|----------|-----------------|------------|------|
-| **一证多域** | 多个子域在同一张证书 | `issue` | `issue` 自动切换 | `expand` | `renew` |
+| **一证多域** | 多个子域在同一张证书 | `issue` | 追加 HTTPS 模板 + `reload` | 更新模板 + `expand` | `renew` |
 | **一域一证** | 各子域独立证书 | `issue-domain <域名>` | `enable-https` 或手动模板 + `reload` | 再 `issue-domain` | `renew` |
 
-默认 `templates/` 中的 **双站点** 模板面向 `DOMAIN_WWW` / `DOMAIN_HT`。基础设施三域名使用 `templates/*-infra*.template`（见下文）。
+默认 `templates/` 只保留基础设施三域名模板。旧前端/后端双站点模板已迁到 `examples/frontend-backend/templates/`，需要时复制到 `templates-enabled/` 后再 `reload`。
 
 ## `proxy.sh` 命令一览
 
 ```bash
 cd proxy
-./scripts/proxy.sh up              # 创建 network，启用 HTTP 模板，启动 nginx
-./scripts/proxy.sh issue           # 按 CERTBOT_DOMAINS 申请证书，切换 HTTPS 并 reload
+./scripts/proxy.sh up              # 创建 network，必要时初始化 HTTP 模板，渲染配置并启动 nginx
+./scripts/proxy.sh issue           # 按 CERTBOT_DOMAINS 申请证书，并 reload 当前启用模板
 ./scripts/proxy.sh issue-domain <domain>
                                    # 单域名证书；不切换 HTTPS 模板
 ./scripts/proxy.sh enable-https    # 基础设施三域名：启用 infra HTTPS 模板并 reload
@@ -102,15 +105,12 @@ cd proxy
 | `NGINX_IMAGE` / `CERTBOT_IMAGE` | 见文件 | 镜像 |
 | `HTTP_PORT` / `HTTPS_PORT` | `80` / `443` | 宿主机映射端口 |
 
-### 双站点模板（`up` / `issue` 默认）
+### 证书变量
 
 | 变量 | 说明 |
 |------|------|
-| `DOMAIN_WWW` / `DOMAIN_HT` | 两个 `server_name` |
-| `DOMAIN_WWW_CERT_NAME` / `DOMAIN_HT_CERT_NAME` | HTTPS 证书目录名 |
-| `WEB_UPSTREAM` / `ADMIN_UPSTREAM` | upstream（`host:port` 或 Docker alias） |
-| `CERT_NAME` | 一证多域时的证书名 |
-| `CERTBOT_DOMAINS` | SAN 列表；为空时用 `DOMAIN_WWW` + `DOMAIN_HT` |
+| `CERTBOT_DOMAINS` | SAN 列表，推荐逗号分隔；空格分隔时需加引号；`issue` / `expand` 必填 |
+| `CERT_NAME` | 一证多域时的证书名；为空时使用 `CERTBOT_DOMAINS` 的第一个域名 |
 | `CERTBOT_EMAIL` | Let's Encrypt 邮箱（必填） |
 | `CERTBOT_STAGING` | `1` 使用测试 CA |
 
@@ -123,7 +123,7 @@ cd proxy
 | `GRAFANA_UPSTREAM` | 如 `host.docker.internal:3000` 或 `grafana:3000`（需在 `shared_proxy`） |
 | `STORE_UPSTREAM` / `ADMIN_STORE_UPSTREAM` | 业务宿主机端口，如 `host.docker.internal:7270` |
 
-修改模板占位符时，须同步 [`scripts/lib-proxy.sh`](scripts/lib-proxy.sh) 中的 `ENVSUBST_VARS`。
+自定义模板可使用任意 `${VAR}` 占位符，只要 `.env.proxy` 中提供同名变量即可；无需改脚本。
 
 ## 基础设施 HTTPS（一域一证）
 
@@ -134,7 +134,7 @@ cd proxy
 | 文件 | 作用 |
 |------|------|
 | `05-infra-upstreams.conf.template` | grafana / store / admin_store upstream |
-| `10-http-infra.conf.template` | 仅 HTTP（签证前；`up` 时与双站点模板一并复制） |
+| `10-http-infra.conf.template` | 仅 HTTP（签证前；`up` 在没有启用模板时复制） |
 | `10-http-redirect-infra.conf.template` | HTTP 跳转 HTTPS + ACME |
 | `20-https-infra.conf.template` | 443 + 证书路径 + `proxy_pass` |
 
@@ -162,7 +162,7 @@ curl -sI https://monitor.example.com/
 
 `enable-https` 会：清空并填充 `templates-enabled/`（infra HTTPS 模板）→ 宿主机 `envsubst` 写入 `conf.d-enabled/` → `nginx -t` → reload。
 
-修改 upstream 或域名后：`./scripts/proxy.sh reload`（**不要**用 `up`，会重置双站点 HTTP 模板）。
+修改 upstream 或域名后：`./scripts/proxy.sh reload`。`up` 会保留已有 `templates-enabled/`，只在没有启用模板时初始化 infra HTTP 模板，并在启动 nginx 前渲染当前模板。
 
 若后端在宿主机端口，保持 `docker-compose.yaml` 中 `host.docker.internal:host-gateway`；业务未监听时 HTTPS 可达但会 **502**。
 
@@ -178,13 +178,15 @@ sudo ./deploy-infra.sh init
 
 证书签发、`enable-https`、`reload` 仍在 `proxy/` 下手动执行（尚未封装进 `deploy-infra.sh`）。
 
-## 首次上线（双站点 + 一证多域）
+## 自定义站点接入
+
+默认不会再启用前端/后端双站点配置。新增站点时，将对应模板追加到 `templates-enabled/`，在 `.env.proxy` 中提供模板变量，然后执行 `reload`。
 
 ### 1. 编辑 `.env.proxy`（服务器）
 
 ```bash
 CERTBOT_EMAIL=you@example.com
-CERTBOT_DOMAINS=www.example.com admin.example.com
+CERTBOT_DOMAINS=www.example.com,admin.example.com
 CERT_NAME=www.example.com
 
 DOMAIN_WWW=www.example.com
@@ -196,7 +198,18 @@ WEB_UPSTREAM=myapp_web:80
 ADMIN_UPSTREAM=myapp_admin:8080
 ```
 
-### 2. 业务接入 `shared_proxy`（可选）
+### 2. 准备模板
+
+```bash
+cd /path/to/dv/proxy
+
+# 可从示例开始，也可以直接写自己的模板。
+cp examples/frontend-backend/templates/05-upstreams.conf.template templates-enabled/
+cp examples/frontend-backend/templates/10-http.conf.template templates-enabled/
+./scripts/proxy.sh reload
+```
+
+### 3. 业务接入 `shared_proxy`（可选）
 
 ```bash
 docker compose -f docker-compose.yaml \
@@ -204,22 +217,27 @@ docker compose -f docker-compose.yaml \
   up -d --build
 ```
 
-### 3. 启动 → 签证
+### 4. 启动 → 签证
 
 ```bash
-cd /path/to/dv/proxy
 ./scripts/proxy.sh up
 ./scripts/proxy.sh issue
 ```
 
-`issue` 成功后自动启用 HTTPS 模板并 reload。
+`issue` 只签发证书并 reload 当前启用模板，不会自动切换 HTTPS。证书签发成功后，将 HTTPS 模板追加到 `templates-enabled/`，再 `reload`：
 
-### 4. 一域一证（双站点）
+```bash
+cp examples/frontend-backend/templates/10-http-redirect.conf.template templates-enabled/10-http.conf.template
+cp examples/frontend-backend/templates/20-https.conf.template templates-enabled/
+./scripts/proxy.sh reload
+```
+
+### 5. 一域一证
 
 ```bash
 ./scripts/proxy.sh issue-domain www.example.com
 ./scripts/proxy.sh issue-domain admin.example.com
-# 手动将 templates/ 中 HTTPS 模板复制到 templates-enabled/ 后：
+# 手动将 HTTPS 模板复制到 templates-enabled/ 后：
 ./scripts/proxy.sh reload
 ```
 
@@ -227,12 +245,12 @@ cd /path/to/dv/proxy
 
 ## 已有站点：新增子域名
 
-**不要**把 `proxy.sh up` 当日常更新；会重置 `templates-enabled/` 为默认 HTTP 双站点模板。
+`proxy.sh up` 会保留已有 `templates-enabled/` 并重新渲染当前模板，但日常改域名、upstream 或模板仍应使用 `reload`。
 
 ### 一证多域
 
 1. `.env.proxy` 中 `CERTBOT_DOMAINS` 写**完整**域名列表  
-2. 改模板并 `reload` → `expand`
+2. 追加或更新模板并 `reload` → `expand`
 
 ### 一域一证
 
@@ -263,7 +281,7 @@ cd /path/to/dv/proxy
 
 1. 业务 compose 加入 `shared_proxy`，设置唯一 alias。  
 2. `.env.proxy` 增加域名与 upstream。  
-3. `templates/` 增加 server 块，扩展 `ENVSUBST_VARS`。  
+3. 增加 server 模板，使用 `${VAR}` 引用 `.env.proxy` 中的域名与 upstream。
 4. 复制到 `templates-enabled/`，`reload`。  
 5. 新公网域名需 `issue-domain` 或 `issue` / `expand`。
 
@@ -279,17 +297,18 @@ ADMIN_STORE_UPSTREAM=host.docker.internal:8090
 
 ```bash
 cd proxy
-./tests/proxy_issue_domain_test.sh
+bash tests/proxy_issue_domain_test.sh
+bash tests/proxy_template_behavior_test.sh
 ```
 
 ## 常见问题
 
-- **`up` 与 `reload`**：日常改配置用 `reload`；仅首次或回到 HTTP 签证前用 `up`。  
+- **`up` 与 `reload`**：日常改配置用 `reload`；`up` 只在没有启用模板时初始化 infra HTTP 模板，并在启动 nginx 前渲染当前模板。
 - **`issue-domain` 后仍无法 HTTPS**：须执行 `enable-https`（infra）或自行加入 HTTPS 模板后 `reload`；仅磁盘有证书不够。  
 - **`conf.d-enabled` 为空或 HTTPS 无响应**：确认已 `reload`；改 compose 挂载后需 `docker compose up -d --force-recreate nginx`。  
 - **502**：TLS 正常但 upstream 无进程（例如 store 端口未监听）。  
 - **80 端口**：webroot 需可访问 `http://<域名>/.well-known/acme-challenge/`。  
 - **`CERTBOT_STAGING=1`**：测试 CA，调试后改回 `0`。  
 - **证书路径**：宿主机 `/data/letsencrypt/live/<cert-name>/`。  
-- **变量未替换**：检查 `ENVSUBST_VARS` 与 `.env.proxy` 是否 `export`（`reload` 会 `source` 该文件）。  
+- **变量未替换**：模板变量必须写成 `${VAR}`，并确认 `.env.proxy` 中有同名变量；裸 `$host` 这类 nginx 变量会保留到运行时。
 - **根域无 A 记录**：`issue-domain example.com` 会失败；先配 DNS 或为 www 单独签发。

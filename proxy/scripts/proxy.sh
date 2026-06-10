@@ -8,8 +8,8 @@ source "$SCRIPT_DIR/lib-proxy.sh"
 usage() {
     cat <<'USAGE'
 用法：
-  proxy.sh up       创建 proxy network 并启动 nginx（首次签证前为 HTTP 反代）
-  proxy.sh issue    使用 certbot webroot 申请证书，成功后切换 HTTPS 配置并 reload nginx
+  proxy.sh up       创建 network，必要时初始化 infra HTTP 模板，渲染配置并启动 nginx
+  proxy.sh issue    使用 CERTBOT_DOMAINS 申请证书，成功后 reload 当前启用模板
   proxy.sh issue-domain <domain>
                     为单个域名单独申请证书，证书名同域名；不会切换 HTTPS 配置
   proxy.sh expand   使用 CERTBOT_DOMAINS 扩展已有证书，成功后 reload nginx
@@ -39,15 +39,34 @@ require_certbot_email() {
 domain_args() {
     local domains_raw domain
     domains_raw="$(env_value CERTBOT_DOMAINS "")"
-
-    if [[ -z "$domains_raw" ]]; then
-        domains_raw="$(env_value DOMAIN_WWW "") $(env_value DOMAIN_HT "")"
-    fi
-
     domains_raw="${domains_raw//,/ }"
     for domain in $domains_raw; do
         [[ -n "$domain" ]] && CERTBOT_DOMAIN_ARGS+=("-d" "$domain")
     done
+}
+
+first_certbot_domain() {
+    local domains_raw domain
+    domains_raw="$(env_value CERTBOT_DOMAINS "")"
+    domains_raw="${domains_raw//,/ }"
+
+    for domain in $domains_raw; do
+        if [[ -n "$domain" ]]; then
+            printf '%s' "$domain"
+            return
+        fi
+    done
+}
+
+cert_name_for_domains() {
+    local cert_name
+    cert_name="$(env_value CERT_NAME "")"
+    if [[ -n "$cert_name" ]]; then
+        printf '%s' "$cert_name"
+        return
+    fi
+
+    first_certbot_domain
 }
 
 cmd="${1:-help}"
@@ -56,7 +75,8 @@ case "$cmd" in
     up)
         ensure_env_file
         ensure_proxy_network
-        enable_http_templates
+        ensure_http_templates
+        render_templates_on_host
         compose_cmd up -d nginx
         ;;
     issue)
@@ -66,7 +86,7 @@ case "$cmd" in
         CERTBOT_DOMAIN_ARGS=()
         domain_args
         if [[ "${#CERTBOT_DOMAIN_ARGS[@]}" -eq 0 ]]; then
-            echo "请在 $ENV_FILE 中设置 CERTBOT_DOMAINS 或 DOMAIN_WWW/DOMAIN_HT。" >&2
+            echo "请在 $ENV_FILE 中设置 CERTBOT_DOMAINS。" >&2
             exit 1
         fi
 
@@ -76,7 +96,7 @@ case "$cmd" in
             echo "使用 Let's Encrypt Staging（CERTBOT_STAGING=1）。"
         fi
 
-        cert_name="$(env_value CERT_NAME "$(env_value DOMAIN_WWW "")")"
+        cert_name="$(cert_name_for_domains)"
         email="$(env_value CERTBOT_EMAIL "")"
 
         compose_cmd run --rm certbot certonly \
@@ -87,9 +107,8 @@ case "$cmd" in
             "${extra_args[@]}" \
             "${CERTBOT_DOMAIN_ARGS[@]}"
 
-        enable_https_templates
         reload_nginx
-        echo "证书与 HTTPS 配置已生效。证书路径：/etc/letsencrypt/live/$cert_name/"
+        echo "证书已签发并重新加载 nginx。证书路径：/etc/letsencrypt/live/$cert_name/"
         ;;
     issue-domain)
         ensure_env_file
@@ -127,7 +146,7 @@ case "$cmd" in
         CERTBOT_DOMAIN_ARGS=()
         domain_args
         if [[ "${#CERTBOT_DOMAIN_ARGS[@]}" -eq 0 ]]; then
-            echo "请在 $ENV_FILE 中设置 CERTBOT_DOMAINS 或 DOMAIN_WWW/DOMAIN_HT。" >&2
+            echo "请在 $ENV_FILE 中设置 CERTBOT_DOMAINS。" >&2
             exit 1
         fi
 
@@ -137,7 +156,7 @@ case "$cmd" in
             echo "使用 Let's Encrypt Staging（CERTBOT_STAGING=1）。"
         fi
 
-        cert_name="$(env_value CERT_NAME "$(env_value DOMAIN_WWW "")")"
+        cert_name="$(cert_name_for_domains)"
         email="$(env_value CERTBOT_EMAIL "")"
 
         compose_cmd run --rm certbot certonly \

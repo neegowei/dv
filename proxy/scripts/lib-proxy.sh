@@ -8,24 +8,6 @@ TEMPLATE_DIR="$PROXY_ROOT/templates"
 ENABLED_TEMPLATE_DIR="$PROXY_ROOT/templates-enabled"
 RENDERED_CONF_DIR="$PROXY_ROOT/conf.d-enabled"
 
-# Keep in sync with infra / default nginx templates.
-ENVSUBST_VARS='$DOMAIN_WWW $DOMAIN_HT $DOMAIN_WWW_CERT_NAME $DOMAIN_HT_CERT_NAME $WEB_UPSTREAM $ADMIN_UPSTREAM $CERT_NAME $DOMAIN_MONITOR $DOMAIN_STORE $DOMAIN_ADMIN_STORE $DOMAIN_MONITOR_CERT_NAME $DOMAIN_STORE_CERT_NAME $DOMAIN_ADMIN_STORE_CERT_NAME $GRAFANA_UPSTREAM $STORE_UPSTREAM $ADMIN_STORE_UPSTREAM'
-
-copy_infra_upstreams() {
-    cp "$TEMPLATE_DIR/05-infra-upstreams.conf.template" "$ENABLED_TEMPLATE_DIR/"
-}
-
-copy_infra_http_templates() {
-    copy_infra_upstreams
-    cp "$TEMPLATE_DIR/10-http-infra.conf.template" "$ENABLED_TEMPLATE_DIR/"
-}
-
-copy_infra_https_templates() {
-    copy_infra_upstreams
-    cp "$TEMPLATE_DIR/10-http-redirect-infra.conf.template" "$ENABLED_TEMPLATE_DIR/"
-    cp "$TEMPLATE_DIR/20-https-infra.conf.template" "$ENABLED_TEMPLATE_DIR/"
-}
-
 compose_cmd() {
     if docker compose version >/dev/null 2>&1; then
         docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
@@ -73,27 +55,45 @@ ensure_proxy_network() {
     fi
 }
 
-enable_http_templates() {
+reset_enabled_templates() {
     rm -rf "$ENABLED_TEMPLATE_DIR"
     mkdir -p "$ENABLED_TEMPLATE_DIR"
-    cp "$TEMPLATE_DIR/05-upstreams.conf.template" "$ENABLED_TEMPLATE_DIR/"
-    cp "$TEMPLATE_DIR/10-http.conf.template" "$ENABLED_TEMPLATE_DIR/"
-    copy_infra_http_templates
 }
 
-enable_https_templates() {
-    rm -rf "$ENABLED_TEMPLATE_DIR"
+copy_templates() {
+    local template
+
     mkdir -p "$ENABLED_TEMPLATE_DIR"
-    cp "$TEMPLATE_DIR/05-upstreams.conf.template" "$ENABLED_TEMPLATE_DIR/"
-    cp "$TEMPLATE_DIR/10-http-redirect.conf.template" "$ENABLED_TEMPLATE_DIR/10-http.conf.template"
-    cp "$TEMPLATE_DIR/20-https.conf.template" "$ENABLED_TEMPLATE_DIR/"
-    copy_infra_https_templates
+    for template in "$@"; do
+        cp "$TEMPLATE_DIR/$template" "$ENABLED_TEMPLATE_DIR/"
+    done
+}
+
+enabled_templates_exist() {
+    compgen -G "$ENABLED_TEMPLATE_DIR/*.template" >/dev/null
+}
+
+enable_infra_http_templates() {
+    reset_enabled_templates
+    copy_templates \
+        "05-infra-upstreams.conf.template" \
+        "10-http-infra.conf.template"
+}
+
+ensure_http_templates() {
+    if enabled_templates_exist; then
+        return
+    fi
+
+    enable_infra_http_templates
 }
 
 enable_infra_https_templates() {
-    rm -rf "$ENABLED_TEMPLATE_DIR"
-    mkdir -p "$ENABLED_TEMPLATE_DIR"
-    copy_infra_https_templates
+    reset_enabled_templates
+    copy_templates \
+        "05-infra-upstreams.conf.template" \
+        "10-http-redirect-infra.conf.template" \
+        "20-https-infra.conf.template"
 }
 
 export_env_from_file() {
@@ -106,8 +106,29 @@ export_env_from_file() {
   set +a
 }
 
+template_envsubst_vars() {
+  local tpl match var
+  local vars=()
+  declare -A seen=()
+
+  for tpl in "$ENABLED_TEMPLATE_DIR"/*.template; do
+    [[ -e "$tpl" ]] || continue
+    while IFS= read -r match; do
+      var="${match#\$\{}"
+      var="${var%\}}"
+      if [[ -z "${seen[$var]:-}" ]]; then
+        seen[$var]=1
+        vars+=("\$$var")
+      fi
+    done < <(grep -ohE '\$\{[A-Za-z_][A-Za-z0-9_]*\}' "$tpl" || true)
+  done
+
+  local IFS=' '
+  printf '%s' "${vars[*]}"
+}
+
 render_templates_on_host() {
-  local tpl out
+  local tpl out envsubst_vars
 
   if ! command -v envsubst >/dev/null 2>&1; then
     echo "请安装 gettext（提供 envsubst 命令）。" >&2
@@ -117,11 +138,16 @@ render_templates_on_host() {
   export_env_from_file
   mkdir -p "$RENDERED_CONF_DIR"
   rm -f "$RENDERED_CONF_DIR"/*.conf
+  envsubst_vars="$(template_envsubst_vars)"
 
   for tpl in "$ENABLED_TEMPLATE_DIR"/*.template; do
     [[ -e "$tpl" ]] || continue
     out="$RENDERED_CONF_DIR/$(basename "$tpl" .template)"
-    envsubst "$ENVSUBST_VARS" <"$tpl" >"$out"
+    if [[ -n "$envsubst_vars" ]]; then
+      envsubst "$envsubst_vars" <"$tpl" >"$out"
+    else
+      cp "$tpl" "$out"
+    fi
   done
 }
 
@@ -134,18 +160,4 @@ reload_nginx() {
   render_templates_on_host
   compose_cmd exec nginx nginx -t
   compose_cmd exec nginx nginx -s reload
-}
-
-certbot_domain_args() {
-    local domains_raw domain
-    domains_raw="$(env_value CERTBOT_DOMAINS "")"
-
-    if [[ -z "$domains_raw" ]]; then
-        domains_raw="$(env_value DOMAIN_WWW "") $(env_value DOMAIN_HT "")"
-    fi
-
-    domains_raw="${domains_raw//,/ }"
-    for domain in $domains_raw; do
-        [[ -n "$domain" ]] && printf -- ' -d %q' "$domain"
-    done
 }
