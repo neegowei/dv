@@ -95,9 +95,32 @@ test_validate_stack_env() {
     [[ "$s_ok" -eq 0 ]] || fail "填好真实值后应通过"
 }
 
+# --- validate 应对齐 example 的必填项（CHANGE_ME）：必填缺失 → 失败；可选缺失 → 通过 ---
+test_validate_detects_missing_required_var() {
+    local dir="$TMP_DIR/msvc"
+    mkdir -p "$dir"
+    # example：SECRET 为必填（CHANGE_ME），PORT 为可选（有默认值）
+    printf 'SECRET=CHANGE_ME\nPORT=8080\n' >"$dir/.env.msvc.example"
+
+    # .env 缺失必填 SECRET（整行没有），仅有可选 PORT → 应失败
+    printf 'PORT=8080\n' >"$dir/.env.msvc"
+    set +e
+    validate_stack_env "$dir" >/dev/null 2>&1; local s_missing=$?
+    set -e
+    [[ "$s_missing" -ne 0 ]] || fail "必填变量 SECRET 整行缺失时应失败"
+
+    # .env 含 SECRET 真实值、缺可选 PORT（有默认值）→ 应通过
+    printf 'SECRET=real-secret\n' >"$dir/.env.msvc"
+    set +e
+    validate_stack_env "$dir" >/dev/null 2>&1; local s_ok=$?
+    set -e
+    [[ "$s_ok" -eq 0 ]] || fail "仅可选变量 PORT 缺失（有默认值）不应失败"
+}
+
 test_find_placeholder_vars_detects_empty_and_change_me
 test_ensure_env_from_example_generates_then_is_idempotent
 test_ensure_env_from_example_missing_example_fails
 test_validate_stack_env
+test_validate_detects_missing_required_var
 
 echo "✅ deploy_infra_env_test 全部通过"

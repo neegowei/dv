@@ -218,6 +218,19 @@ find_placeholder_vars() {
     done <"$file"
 }
 
+# 输出 example 中标记为必填（值为空或以 CHANGE_ME 开头）、但 env 文件里整行缺失的变量名。
+# 避免 .env 缺少必填项时被 compose 的弱默认值（如 ${MYSQL_ROOT_PASSWORD:-root}）静默兜底。
+find_missing_required_vars() {
+    local env_file="$1" example="$2" key
+    [[ -f "$example" ]] || return 0
+    while IFS= read -r key; do
+        [[ -z "$key" ]] && continue
+        if ! grep -qE "^[[:space:]]*${key}=" "$env_file"; then
+            printf '%s\n' "$key"
+        fi
+    done < <(find_placeholder_vars "$example")
+}
+
 # 缺 .env.<name> 时从 .env.<name>.example 复制；已存在则跳过（幂等，不覆盖真实配置）。
 ensure_env_from_example() {
     local dir="$1" env_file example
@@ -237,10 +250,11 @@ ensure_env_from_example() {
     return 0
 }
 
-# 校验单个 stack 的 .env：文件需存在，且无空值/占位符变量。
+# 校验单个 stack 的 .env：文件需存在、必填项不缺失、且无空值/占位符变量。
 validate_stack_env() {
-    local dir="$1" env_file name
+    local dir="$1" env_file example name
     env_file="$(stack_env_file "$dir")"
+    example="${env_file}.example"
     name="$(basename "$dir")"
 
     if [[ ! -f "$env_file" ]]; then
@@ -248,10 +262,14 @@ validate_stack_env() {
         return 1
     fi
 
-    local missing
-    mapfile -t missing < <(find_placeholder_vars "$env_file")
-    if [[ "${#missing[@]}" -gt 0 ]]; then
-        echo "  ✗ ${name}：以下变量仍为占位符/空值：${missing[*]}" >&2
+    local problems=() missing placeholders v
+    mapfile -t missing < <(find_missing_required_vars "$env_file" "$example")
+    mapfile -t placeholders < <(find_placeholder_vars "$env_file")
+    for v in "${missing[@]}"; do [[ -n "$v" ]] && problems+=("${v}(缺失)"); done
+    for v in "${placeholders[@]}"; do [[ -n "$v" ]] && problems+=("${v}(占位/空)"); done
+
+    if [[ "${#problems[@]}" -gt 0 ]]; then
+        echo "  ✗ ${name}：${problems[*]}" >&2
         return 1
     fi
     echo "  ✓ ${name}"
@@ -407,6 +425,7 @@ cmd_restart() {
     require_docker
     local stacks
     mapfile -t stacks < <(resolve_stacks "$@")
+    validate_stacks "${stacks[@]}"
     for stack in "${stacks[@]}"; do
         stack_down "$stack"
         stack_up "$stack"
