@@ -10,10 +10,16 @@ distributor:
         http:
           endpoint: 0.0.0.0:4318
 
-ingester:
+live_store:
   max_block_duration: 5m
 
-compactor:
+backend_scheduler:
+  provider:
+    compaction:
+      compaction:
+        block_retention: 168h
+
+backend_worker:
   compaction:
     block_retention: 168h
 
