@@ -105,6 +105,12 @@ export_env_from_file() {
     return 1
   fi
   local allow=" $* "
+  # 先清理白名单变量的宿主环境值，确保模板变量只来自 .env（.env 未定义即为空，
+  # 不继承宿主同名环境变量，例如运行环境里恰好存在的 DOMAIN/HTTP_PORT 等）。
+  local w
+  for w in "$@"; do
+    unset "$w" 2>/dev/null || true
+  done
   local line key val
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"

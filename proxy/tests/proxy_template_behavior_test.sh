@@ -222,9 +222,34 @@ TPL
     assert_file_contains "$CONF_DIR/90-extra.conf" "proxy_pass http://app:8080;"
 }
 
+test_render_does_not_inherit_ambient_env() {
+    local env_file="$TMP_DIR/ambient.env"
+
+    reset_runtime_dirs
+    # .env 不定义 DOMAIN_AMBIENT；模板变量应只来自 .env，不得继承宿主同名环境变量
+    write_env "$env_file" "CUSTOM_UPSTREAM=app:8080"
+    cat >"$ENABLED_DIR/90-amb.conf.template" <<'TPL'
+server {
+    listen 80;
+    server_name ${DOMAIN_AMBIENT};
+    location / { proxy_pass http://${CUSTOM_UPSTREAM}; }
+}
+TPL
+
+    DOMAIN_AMBIENT="ambient.example.test" \
+        PROXY_ENV_FILE="$env_file" "$ROOT/scripts/proxy.sh" reload >/dev/null
+
+    if grep -q "ambient.example.test" "$CONF_DIR/90-amb.conf"; then
+        echo "渲染不应使用宿主环境的 DOMAIN_AMBIENT（模板变量只应来自 .env）" >&2
+        exit 1
+    fi
+    assert_file_contains "$CONF_DIR/90-amb.conf" "proxy_pass http://app:8080;"
+}
+
 test_render_scans_custom_template_variables
 test_up_preserves_existing_enabled_templates
 test_issue_requires_certbot_domains_without_legacy_fallback
 test_issue_preserves_templates_and_uses_first_domain_as_cert_name
 test_render_does_not_execute_env_shell
 test_render_ignores_non_template_env_vars
+test_render_does_not_inherit_ambient_env
