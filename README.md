@@ -17,7 +17,24 @@
 
 各 stack 使用独立的 external Docker network（如 `shared_proxy`、`shared_db`）。业务项目通过 [`proxy/examples/p260507-network.override.yaml`](proxy/examples/p260507-network.override.yaml) 接入 `shared_proxy`。
 
+## 前置依赖
+
+- Docker Engine
+- Docker Compose V2（`docker compose`）或 `docker-compose`
+- `envsubst`（`gettext` 包）— proxy 在宿主机渲染 nginx 模板时使用
+
 ## 快速开始
+
+首次在新服务器上，三步即可跑起来：
+
+```bash
+./deploy-infra.sh init-env     # 1. 从 .env.*.example 生成 .env.*
+# 编辑各 .env.*，把 CHANGE_ME 占位值改成真实值
+sudo ./deploy-infra.sh init    # 2. 创建 /data 数据目录与 Docker networks
+./deploy-infra.sh up           # 3. 校验配置并启动全部服务
+```
+
+下面是分步说明。
 
 ### 1. 准备环境变量（仅服务器 / 本地，勿提交）
 
@@ -29,7 +46,7 @@
 ./deploy-infra.sh validate
 ```
 
-`up` 启动前会自动执行同样的校验，任一变量仍为 `CHANGE_ME` 或空值即 fail fast。
+`.env.*.example` 中以 `CHANGE_ME` 开头的值表示**必须改成真实值**；`up` 启动前会自动执行同样的校验，任一变量仍为 `CHANGE_ME` 或空值即 fail fast，不会启动任何容器。
 
 ### 2. 初始化数据目录与网络（首次）
 
@@ -81,12 +98,23 @@ sudo ./deploy-infra.sh init           # init-data + init-networks
 ```
 .
 ├── deploy-infra.sh          # 统一部署入口
+├── tests/                   # Bash 测试（mock docker，无需真实环境）
 ├── proxy/                   # nginx + certbot（详见 proxy/README.md）
 ├── db/
 ├── monitor/
 ├── etcd/
 ├── rabbitmq/
 └── minio/
+```
+
+## 测试
+
+纯 Bash 测试，mock docker + 临时目录隔离，不触碰真实环境与仓库运行态文件：
+
+```bash
+bash tests/deploy_infra_env_test.sh               # init-env / validate 逻辑
+bash proxy/tests/proxy_template_behavior_test.sh  # 模板渲染
+bash proxy/tests/proxy_issue_domain_test.sh       # 证书签发参数
 ```
 
 ## 文档
@@ -97,7 +125,8 @@ sudo ./deploy-infra.sh init           # init-data + init-networks
 
 | 路径 | 是否进 Git | 说明 |
 |------|------------|------|
-| `**/.env.*` | 否 | 密码、域名、邮箱 |
+| `**/.env.*` | 否 | 真实配置：密码、域名、邮箱 |
+| `**/.env.*.example` | 是 | 脱敏模板，`CHANGE_ME` 标记必须改的值 |
 | `proxy/conf.d-enabled/*.conf` | 否 | 渲染后的 nginx 配置 |
 | `proxy/templates-enabled/` | 否 | 服务器当前启用的模板副本 |
 | `proxy/templates/` | 是 | 带 `${变量}` 的通用模板 |
