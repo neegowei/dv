@@ -171,7 +171,36 @@ test_issue_preserves_templates_and_uses_first_domain_as_cert_name() {
     assert_file_contains "$DOCKER_CALLS" "-d api.example.test"
 }
 
+test_render_does_not_execute_env_shell() {
+    local env_file="$TMP_DIR/evil.env"
+    local marker="$TMP_DIR/pwned"
+
+    reset_runtime_dirs
+    # .env 中混入命令替换，并用带空格的引号值验证安全解析仍正确
+    write_env "$env_file" \
+        'CUSTOM_DOMAIN="a.example.test b.example.test"' \
+        "EVIL=\$(touch $marker)" \
+        "CUSTOM_UPSTREAM=app:8080"
+    cat >"$ENABLED_DIR/90-evil.conf.template" <<'TPL'
+server {
+    listen 80;
+    server_name ${CUSTOM_DOMAIN};
+    location / { proxy_pass http://${CUSTOM_UPSTREAM}; }
+}
+TPL
+
+    PROXY_ENV_FILE="$env_file" "$ROOT/scripts/proxy.sh" reload >/dev/null
+
+    if [[ -e "$marker" ]]; then
+        echo "render 不应执行 .env 中的 shell 命令（EVIL=\$(...)）" >&2
+        exit 1
+    fi
+    assert_file_contains "$CONF_DIR/90-evil.conf" "server_name a.example.test b.example.test;"
+    assert_file_contains "$CONF_DIR/90-evil.conf" "proxy_pass http://app:8080;"
+}
+
 test_render_scans_custom_template_variables
 test_up_preserves_existing_enabled_templates
 test_issue_requires_certbot_domains_without_legacy_fallback
 test_issue_preserves_templates_and_uses_first_domain_as_cert_name
+test_render_does_not_execute_env_shell

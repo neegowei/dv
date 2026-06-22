@@ -100,10 +100,22 @@ export_env_from_file() {
   if [[ ! -f "$ENV_FILE" ]]; then
     return 1
   fi
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
+  # 安全解析 KEY=VALUE 后 export，不 source —— 避免 .env 中混入的 shell 语法
+  # （如 $(...)、反引号、; 命令）在 render/reload 时被执行。
+  local line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" != *=* ]] && continue
+    key="${line%%=*}"
+    val="${line#*=}"
+    key="${key#"${key%%[![:space:]]*}"}"; key="${key%"${key##*[![:space:]]}"}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    val="${val#"${val%%[![:space:]]*}"}"; val="${val%"${val##*[![:space:]]}"}"
+    val="${val%\"}"; val="${val#\"}"
+    val="${val%\'}"; val="${val#\'}"
+    export "$key=$val"
+  done <"$ENV_FILE"
 }
 
 template_envsubst_vars() {
