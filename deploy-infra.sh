@@ -31,10 +31,14 @@ declare -A STACKS=(
 usage() {
     cat <<'USAGE'
 用法：
+  deploy-infra.sh init-env [stack ...]
+                                     从 .env.*.example 生成缺失的 .env.*（幂等，不覆盖）
   deploy-infra.sh init-data          创建 /data 子目录并设置属主/权限（需 root）
   deploy-infra.sh init-networks      创建 Docker external networks
   deploy-infra.sh init               init-data + init-networks
-  deploy-infra.sh up [stack ...]     启动服务（默认全部）
+  deploy-infra.sh validate [stack ...]
+                                     校验各 stack 的 .env 是否仍有占位符/空值
+  deploy-infra.sh up [stack ...]     校验配置后启动服务（默认全部）
   deploy-infra.sh down [stack ...]   停止服务（默认全部）
   deploy-infra.sh restart [stack ...]
   deploy-infra.sh ps [stack ...]     查看状态
@@ -189,6 +193,89 @@ compose_cmd_fixed() {
     fi
 }
 
+# ---- .env 引导与校验 ----
+
+# .env.example 中需用户填写真实值的占位前缀；值为空或以此开头视为"未配置"。
+PLACEHOLDER_PREFIX="CHANGE_ME"
+
+# 输出 env 文件中值为空或仍为占位符的变量名（每行一个）。
+find_placeholder_vars() {
+    local file="$1" line key val
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ "$line" != *=* ]] && continue
+        key="${line%%=*}"
+        val="${line#*=}"
+        key="${key#"${key%%[![:space:]]*}"}"; key="${key%"${key##*[![:space:]]}"}"
+        val="${val#"${val%%[![:space:]]*}"}"; val="${val%"${val##*[![:space:]]}"}"
+        val="${val%\"}"; val="${val#\"}"
+        val="${val%\'}"; val="${val#\'}"
+        [[ -z "$key" ]] && continue
+        if [[ -z "$val" || "$val" == "${PLACEHOLDER_PREFIX}"* ]]; then
+            printf '%s\n' "$key"
+        fi
+    done <"$file"
+}
+
+# 缺 .env.<name> 时从 .env.<name>.example 复制；已存在则跳过（幂等，不覆盖真实配置）。
+ensure_env_from_example() {
+    local dir="$1" env_file example
+    env_file="$(stack_env_file "$dir")"
+    example="${env_file}.example"
+
+    if [[ -f "$env_file" ]]; then
+        echo "  已存在，跳过：$env_file"
+        return 0
+    fi
+    if [[ ! -f "$example" ]]; then
+        echo "  ⚠ 缺少示例文件：$example" >&2
+        return 1
+    fi
+    cp "$example" "$env_file"
+    echo "  已生成：$env_file（请填写其中的 ${PLACEHOLDER_PREFIX} 占位值）"
+    return 0
+}
+
+# 校验单个 stack 的 .env：文件需存在，且无空值/占位符变量。
+validate_stack_env() {
+    local dir="$1" env_file name
+    env_file="$(stack_env_file "$dir")"
+    name="$(basename "$dir")"
+
+    if [[ ! -f "$env_file" ]]; then
+        echo "  ✗ ${name}：缺少 ${env_file}（先运行 ./deploy-infra.sh init-env）" >&2
+        return 1
+    fi
+
+    local missing
+    mapfile -t missing < <(find_placeholder_vars "$env_file")
+    if [[ "${#missing[@]}" -gt 0 ]]; then
+        echo "  ✗ ${name}：以下变量仍为占位符/空值：${missing[*]}" >&2
+        return 1
+    fi
+    echo "  ✓ ${name}"
+    return 0
+}
+
+# 校验一组 stack，任一失败则整体 fail fast。
+validate_stacks() {
+    local ok=1 stack dir
+    echo "=== 校验各 stack 配置 ==="
+    for stack in "$@"; do
+        dir="${STACKS[$stack]:-}"
+        if [[ -z "$dir" ]]; then
+            echo "未知 stack：$stack" >&2
+            exit 1
+        fi
+        validate_stack_env "$dir" || ok=0
+    done
+    if [[ "$ok" -ne 1 ]]; then
+        echo "配置校验失败：请补全上述变量（或先运行 ./deploy-infra.sh init-env）。" >&2
+        exit 1
+    fi
+}
+
 resolve_stacks() {
     if [[ "$#" -gt 0 ]]; then
         printf '%s\n' "$@"
@@ -264,11 +351,38 @@ stack_logs() {
     fi
 }
 
-cmd_up() {
-    require_docker
-    cmd_init_networks
+cmd_init_env() {
+    local stacks stack dir generated=0
+    mapfile -t stacks < <(resolve_stacks "$@")
+    echo "=== 初始化各 stack 的 .env 文件 ==="
+    for stack in "${stacks[@]}"; do
+        dir="${STACKS[$stack]:-}"
+        if [[ -z "$dir" ]]; then
+            echo "未知 stack：$stack" >&2
+            exit 1
+        fi
+        [[ -f "$(stack_env_file "$dir")" ]] || generated=1
+        ensure_env_from_example "$dir" || true
+    done
+    if [[ "$generated" -eq 1 ]]; then
+        echo
+        echo "下一步：编辑上面新生成的 .env.* 文件，把 ${PLACEHOLDER_PREFIX} 占位值改为真实值，再运行 ./deploy-infra.sh up"
+    fi
+}
+
+cmd_validate() {
     local stacks
     mapfile -t stacks < <(resolve_stacks "$@")
+    validate_stacks "${stacks[@]}"
+    echo "配置校验通过。"
+}
+
+cmd_up() {
+    require_docker
+    local stacks
+    mapfile -t stacks < <(resolve_stacks "$@")
+    validate_stacks "${stacks[@]}"
+    cmd_init_networks
     for stack in "${stacks[@]}"; do
         stack_up "$stack"
     done
@@ -324,9 +438,11 @@ main() {
     shift || true
 
     case "$cmd" in
+        init-env) cmd_init_env "$@" ;;
         init-data) cmd_init_data ;;
         init-networks) cmd_init_networks ;;
         init) cmd_init ;;
+        validate) cmd_validate "$@" ;;
         up) cmd_up "$@" ;;
         down) cmd_down "$@" ;;
         restart) cmd_restart "$@" ;;
@@ -340,4 +456,7 @@ main() {
     esac
 }
 
-main "$@"
+# 仅在直接执行时运行 main；被 source（如测试）时只加载函数定义。
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

@@ -22,9 +22,14 @@
 ### 1. 准备环境变量（仅服务器 / 本地，勿提交）
 
 ```bash
-# 在服务器上新建，勿提交 Git（见 .gitignore）
-# proxy/.env.proxy、db/.env.db、monitor/.env.monitor 等 — 字段说明见各目录 README
+# 从各 stack 的 .env.*.example 生成缺失的 .env.*（幂等，不覆盖已有真实配置）
+./deploy-infra.sh init-env
+# 编辑生成的文件，把 CHANGE_ME 占位值改为真实值（字段说明见各目录 README）
+# 校验是否还有占位符 / 空值
+./deploy-infra.sh validate
 ```
+
+`up` 启动前会自动执行同样的校验，任一变量仍为 `CHANGE_ME` 或空值即 fail fast。
 
 ### 2. 初始化数据目录与网络（首次）
 
@@ -54,11 +59,13 @@ sudo ./deploy-infra.sh init
 ## `deploy-infra.sh` 命令
 
 ```bash
+./deploy-infra.sh init-env [stack ...]   # 从 .env.*.example 生成缺失的 .env.*（幂等）
+./deploy-infra.sh validate [stack ...]   # 校验 .env.* 无占位符 / 空值
 sudo ./deploy-infra.sh init-data      # 仅创建 /data 子目录
 ./deploy-infra.sh init-networks       # 仅创建 Docker networks
 sudo ./deploy-infra.sh init           # init-data + init-networks
 
-./deploy-infra.sh up [stack ...]
+./deploy-infra.sh up [stack ...]      # 校验配置后启动
 ./deploy-infra.sh down [stack ...]
 ./deploy-infra.sh restart [stack ...]
 ./deploy-infra.sh ps [stack ...]
