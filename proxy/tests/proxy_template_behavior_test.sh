@@ -4,9 +4,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 
+# 运行态目录隔离到 TMP_DIR：测试经 PROXY_ENABLED_TEMPLATE_DIR / PROXY_RENDERED_CONF_DIR
+# 让 lib-proxy.sh 把模板渲染落到这里，避免 reset/cleanup 误删仓库内真实的
+# templates-enabled/ 与 conf.d-enabled/。
+ENABLED_DIR="$TMP_DIR/templates-enabled"
+CONF_DIR="$TMP_DIR/conf.d-enabled"
+
 cleanup() {
-    rm -rf "$TMP_DIR" "$ROOT/templates-enabled"
-    rm -f "$ROOT/conf.d-enabled"/*.conf
+    rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
@@ -33,12 +38,14 @@ chmod +x "$FAKE_BIN/docker"
 export PATH="$FAKE_BIN:$PATH"
 export DOCKER_CALLS="$TMP_DIR/docker-calls.log"
 export PROXY_COMPOSE_FILE="$ROOT/docker-compose.yaml"
+export PROXY_ENABLED_TEMPLATE_DIR="$ENABLED_DIR"
+export PROXY_RENDERED_CONF_DIR="$CONF_DIR"
 
 reset_runtime_dirs() {
     : >"$DOCKER_CALLS"
-    rm -rf "$ROOT/templates-enabled"
-    mkdir -p "$ROOT/templates-enabled" "$ROOT/conf.d-enabled"
-    rm -f "$ROOT/conf.d-enabled"/*.conf
+    rm -rf "$ENABLED_DIR"
+    mkdir -p "$ENABLED_DIR" "$CONF_DIR"
+    rm -f "$CONF_DIR"/*.conf
 }
 
 write_env() {
@@ -69,7 +76,7 @@ test_render_scans_custom_template_variables() {
         "CUSTOM_DOMAIN=app.example.test" \
         "CUSTOM_UPSTREAM=app:8080"
 
-    cat >"$ROOT/templates-enabled/90-custom.conf.template" <<'TPL'
+    cat >"$ENABLED_DIR/90-custom.conf.template" <<'TPL'
 server {
     listen 80;
     server_name ${CUSTOM_DOMAIN};
@@ -84,10 +91,10 @@ TPL
 
     PROXY_ENV_FILE="$env_file" "$ROOT/scripts/proxy.sh" reload >/dev/null
 
-    assert_file_contains "$ROOT/conf.d-enabled/90-custom.conf" "server_name app.example.test;"
-    assert_file_contains "$ROOT/conf.d-enabled/90-custom.conf" "proxy_pass http://app:8080;"
-    assert_file_contains "$ROOT/conf.d-enabled/90-custom.conf" 'proxy_set_header Host $host;'
-    assert_file_contains "$ROOT/conf.d-enabled/90-custom.conf" 'return 301 https://$host$request_uri;'
+    assert_file_contains "$CONF_DIR/90-custom.conf" "server_name app.example.test;"
+    assert_file_contains "$CONF_DIR/90-custom.conf" "proxy_pass http://app:8080;"
+    assert_file_contains "$CONF_DIR/90-custom.conf" 'proxy_set_header Host $host;'
+    assert_file_contains "$CONF_DIR/90-custom.conf" 'return 301 https://$host$request_uri;'
 }
 
 test_up_preserves_existing_enabled_templates() {
@@ -97,7 +104,7 @@ test_up_preserves_existing_enabled_templates() {
     write_env "$env_file" \
         "PROXY_NETWORK=shared_proxy" \
         "CUSTOM_DOMAIN=up.example.test"
-    cat >"$ROOT/templates-enabled/90-custom.conf.template" <<'TPL'
+    cat >"$ENABLED_DIR/90-custom.conf.template" <<'TPL'
 server {
     listen 80;
     server_name ${CUSTOM_DOMAIN};
@@ -106,12 +113,12 @@ TPL
 
     PROXY_ENV_FILE="$env_file" "$ROOT/scripts/proxy.sh" up >/dev/null
 
-    if [[ ! -f "$ROOT/templates-enabled/90-custom.conf.template" ]]; then
+    if [[ ! -f "$ENABLED_DIR/90-custom.conf.template" ]]; then
         echo "expected proxy.sh up to preserve existing templates-enabled files" >&2
         exit 1
     fi
 
-    assert_file_contains "$ROOT/conf.d-enabled/90-custom.conf" "server_name up.example.test;"
+    assert_file_contains "$CONF_DIR/90-custom.conf" "server_name up.example.test;"
 }
 
 test_issue_requires_certbot_domains_without_legacy_fallback() {
@@ -145,16 +152,16 @@ test_issue_preserves_templates_and_uses_first_domain_as_cert_name() {
     write_env "$env_file" \
         "CERTBOT_EMAIL=admin@example.test" \
         "CERTBOT_DOMAINS=app.example.test,api.example.test"
-    echo "# custom template" >"$ROOT/templates-enabled/90-custom.conf.template"
+    echo "# custom template" >"$ENABLED_DIR/90-custom.conf.template"
 
     PROXY_ENV_FILE="$env_file" "$ROOT/scripts/proxy.sh" issue >/dev/null
 
-    if [[ ! -f "$ROOT/templates-enabled/90-custom.conf.template" ]]; then
+    if [[ ! -f "$ENABLED_DIR/90-custom.conf.template" ]]; then
         echo "expected proxy.sh issue to preserve existing templates-enabled files" >&2
         exit 1
     fi
 
-    if [[ -f "$ROOT/templates-enabled/20-https.conf.template" ]]; then
+    if [[ -f "$ENABLED_DIR/20-https.conf.template" ]]; then
         echo "expected proxy.sh issue not to enable legacy frontend/backend HTTPS templates" >&2
         exit 1
     fi

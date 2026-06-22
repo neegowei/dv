@@ -4,9 +4,9 @@ set -euo pipefail
 PROXY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${PROXY_COMPOSE_FILE:-$PROXY_ROOT/docker-compose.yaml}"
 ENV_FILE="${PROXY_ENV_FILE:-$PROXY_ROOT/.env.proxy}"
-TEMPLATE_DIR="$PROXY_ROOT/templates"
-ENABLED_TEMPLATE_DIR="$PROXY_ROOT/templates-enabled"
-RENDERED_CONF_DIR="$PROXY_ROOT/conf.d-enabled"
+TEMPLATE_DIR="${PROXY_TEMPLATE_DIR:-$PROXY_ROOT/templates}"
+ENABLED_TEMPLATE_DIR="${PROXY_ENABLED_TEMPLATE_DIR:-$PROXY_ROOT/templates-enabled}"
+RENDERED_CONF_DIR="${PROXY_RENDERED_CONF_DIR:-$PROXY_ROOT/conf.d-enabled}"
 
 compose_cmd() {
     if docker compose version >/dev/null 2>&1; then
