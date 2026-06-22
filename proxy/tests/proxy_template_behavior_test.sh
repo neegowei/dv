@@ -199,8 +199,32 @@ TPL
     assert_file_contains "$CONF_DIR/90-evil.conf" "proxy_pass http://app:8080;"
 }
 
+test_render_ignores_non_template_env_vars() {
+    local env_file="$TMP_DIR/extra.env"
+
+    reset_runtime_dirs
+    # PATH 等非模板变量不应被 export 到渲染进程；否则 PATH 损坏会让 mkdir/envsubst command not found
+    write_env "$env_file" \
+        "CUSTOM_DOMAIN=ok.example.test" \
+        "PATH=/does/not/exist" \
+        "CUSTOM_UPSTREAM=app:8080"
+    cat >"$ENABLED_DIR/90-extra.conf.template" <<'TPL'
+server {
+    listen 80;
+    server_name ${CUSTOM_DOMAIN};
+    location / { proxy_pass http://${CUSTOM_UPSTREAM}; }
+}
+TPL
+
+    PROXY_ENV_FILE="$env_file" "$ROOT/scripts/proxy.sh" reload >/dev/null
+
+    assert_file_contains "$CONF_DIR/90-extra.conf" "server_name ok.example.test;"
+    assert_file_contains "$CONF_DIR/90-extra.conf" "proxy_pass http://app:8080;"
+}
+
 test_render_scans_custom_template_variables
 test_up_preserves_existing_enabled_templates
 test_issue_requires_certbot_domains_without_legacy_fallback
 test_issue_preserves_templates_and_uses_first_domain_as_cert_name
 test_render_does_not_execute_env_shell
+test_render_ignores_non_template_env_vars

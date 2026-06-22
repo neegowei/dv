@@ -96,12 +96,15 @@ enable_infra_https_templates() {
         "20-https-infra.conf.template"
 }
 
+# 从 .env 安全解析 KEY=VALUE 后 export —— 不 source，避免 .env 中混入的 shell 语法
+# （$(...)、反引号、; 命令）被执行；且仅 export 白名单（模板引用到的变量）内的 key，
+# 避免 PATH/IFS/LD_PRELOAD 等无关变量污染随后的 mkdir/envsubst/cp 等渲染命令。
+# 参数：以空格分隔的允许变量名列表（不带 $）。无参数时不 export 任何变量。
 export_env_from_file() {
   if [[ ! -f "$ENV_FILE" ]]; then
     return 1
   fi
-  # 安全解析 KEY=VALUE 后 export，不 source —— 避免 .env 中混入的 shell 语法
-  # （如 $(...)、反引号、; 命令）在 render/reload 时被执行。
+  local allow=" $* "
   local line key val
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"
@@ -111,6 +114,7 @@ export_env_from_file() {
     val="${line#*=}"
     key="${key#"${key%%[![:space:]]*}"}"; key="${key%"${key##*[![:space:]]}"}"
     [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    [[ "$allow" == *" $key "* ]] || continue
     val="${val#"${val%%[![:space:]]*}"}"; val="${val%"${val##*[![:space:]]}"}"
     val="${val%\"}"; val="${val#\"}"
     val="${val%\'}"; val="${val#\'}"
@@ -147,10 +151,12 @@ render_templates_on_host() {
     return 1
   fi
 
-  export_env_from_file
+  # 先算出模板引用的变量（此时 PATH 等仍干净），仅以这些变量为白名单 export，
+  # 避免 .env 里的 PATH/IFS 等污染下面的 mkdir/rm/envsubst。
+  envsubst_vars="$(template_envsubst_vars)"
+  export_env_from_file ${envsubst_vars//\$/}
   mkdir -p "$RENDERED_CONF_DIR"
   rm -f "$RENDERED_CONF_DIR"/*.conf
-  envsubst_vars="$(template_envsubst_vars)"
 
   for tpl in "$ENABLED_TEMPLATE_DIR"/*.template; do
     [[ -e "$tpl" ]] || continue
