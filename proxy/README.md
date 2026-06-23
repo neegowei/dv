@@ -53,7 +53,7 @@ conf.d-enabled/         # 渲染后的 nginx 配置（gitignore）
 
 - 域名 A/AAAA 记录已指向当前服务器
 - 公网可访问本机 **80** 端口（Let's Encrypt webroot 验证）
-- `.env.proxy` 中已设置有效的 `CERTBOT_EMAIL`（不能仍为 `admin@example.com`）
+- `.env.proxy` 中 `CERTBOT_EMAIL` 已换成**真实可收信邮箱**（不能保留示例值如 `admin@example.test`；注意脚本目前只硬拒 `admin@example.com`，示例的 `.test` 邮箱不会被拦，但你将收不到 Let's Encrypt 的到期通知）
 - 宿主机已存在 `/data/certbot-www` 与 `/data/letsencrypt`（或先执行 `sudo ./deploy-infra.sh init-data`）
 - 宿主机已安装 `envsubst`（Debian/Ubuntu：`gettext` 包）
 
@@ -178,6 +178,142 @@ sudo ./deploy-infra.sh init
 
 证书签发、`enable-https`、`reload` 仍在 `proxy/` 下手动执行（尚未封装进 `deploy-infra.sh`）。
 
+## 分步示例：新增一个站点（demo）
+
+下面用占位名 `demo` 演示如何接入一个新站点。把命令里的 `<path-to-your-dv>` 换成你本机仓库根目录的绝对路径（例如 `/home/you/dv`），把 `demo` / `demo_web` / 域名换成你自己的。
+
+站点采用「运行时 resolver」写法：upstream 用变量 + `resolver 127.0.0.11`，后端没启动时只让该站点 502，不会拖垮整个 nginx。
+
+- **本地 HTTP**（`*.localhost`，无需证书）→ A
+- **公网 HTTPS**（真实域名 + Let's Encrypt 证书）→ B
+
+### A. 本地 HTTP 站点（`demo.localhost` → `demo_web:3000`）
+
+**1. 建站点模板** `<path-to-your-dv>/proxy/templates-enabled/30-http-demo.conf.template`：
+
+```nginx
+# edge proxy 站点 —— demo.localhost（本地 HTTP，无需证书）
+server {
+    listen 80;
+    server_name ${DOMAIN_DEMO};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+    }
+
+    location / {
+        # 按请求解析 demo_web；后端未启动时仅本站 502，不影响 nginx reload
+        resolver 127.0.0.11 valid=10s ipv6=off;
+        set $demo_upstream ${DEMO_UPSTREAM};
+        proxy_pass http://$demo_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+}
+```
+
+**2. `.env.proxy` 增加变量**：
+
+```bash
+DOMAIN_DEMO=demo.localhost
+DEMO_UPSTREAM=demo_web:3000
+```
+
+**3. 渲染并热重载**（`reload` 要求 nginx 已在运行；首次部署 proxy 时改用 `up`）：
+
+```bash
+cd <path-to-your-dv>/proxy
+./scripts/proxy.sh reload      # proxy 尚未启动时改用：./scripts/proxy.sh up
+```
+
+**4. 后端接入 `shared_proxy`（关键）**：后端容器须在 `shared_proxy` 网络上、network alias 为 `demo_web`（与 `DEMO_UPSTREAM` 对应），否则始终 502。在你的业务 compose 里：
+
+```yaml
+networks:
+  shared_proxy:
+    external: true
+services:
+  app:                       # 监听 3000
+    networks:
+      shared_proxy:
+        aliases: [demo_web]
+```
+
+> `demo.localhost` 在本机自动解析到 `127.0.0.1`；远程访问需在客户端 hosts 指向 proxy 主机。
+
+### B. 公网 HTTPS 站点（`demo.example.com` → `demo_web:3000`）
+
+`*.localhost` 无法签发证书，HTTPS 必须用**真实公网域名**，并满足[前置条件](#前置条件)（DNS 指向本机、80 端口公网可达、`CERTBOT_EMAIL` 有效）。
+
+> **顺序很关键**：证书签发**之前**只能启用 HTTP 模板；HTTPS 模板引用证书文件，必须等签发成功后再加入，否则 `nginx -t` 会因找不到证书而失败。
+
+**1. 建 HTTP 模板**：同 A 的 `30-http-demo.conf.template`，把 `DOMAIN_DEMO` 设为公网域名即可。如需强制跳转 HTTPS，可把 `location /` 内容换成 `return 301 https://$host$request_uri;`，但 `acme-challenge` 那个 location **必须保留**（供签证验证）。
+
+**2. `.env.proxy` 增加变量**：
+
+```bash
+CERTBOT_EMAIL=you@example.com         # 必填，换成你的真实可收信邮箱（勿保留示例值）
+DOMAIN_DEMO=demo.example.com
+DEMO_UPSTREAM=demo_web:3000
+DEMO_CERT_NAME=demo.example.com
+```
+
+**3. 起 nginx（确保 80 可达）并签发证书**：
+
+```bash
+cd <path-to-your-dv>/proxy
+./scripts/proxy.sh up                            # 已在运行则改用 reload
+./scripts/proxy.sh issue-domain demo.example.com
+```
+
+> 调试阶段可先设 `CERTBOT_STAGING=1` 用测试 CA，成功后改回 `0` 再签正式证书。证书签发到宿主机 `/data/letsencrypt/live/demo.example.com/`。
+
+**4. 签发成功后**，建 HTTPS 模板 `<path-to-your-dv>/proxy/templates-enabled/30-https-demo.conf.template`：
+
+```nginx
+# edge proxy 站点 —— demo.example.com（443 + 证书 + 反代）
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN_DEMO};
+
+    ssl_certificate     /etc/letsencrypt/live/${DEMO_CERT_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DEMO_CERT_NAME}/privkey.pem;
+
+    location / {
+        resolver 127.0.0.11 valid=10s ipv6=off;
+        set $demo_upstream ${DEMO_UPSTREAM};
+        proxy_pass http://$demo_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+}
+```
+
+**5. 热重载并验证**：
+
+```bash
+./scripts/proxy.sh reload
+curl -sI https://demo.example.com/
+```
+
+后端 `demo_web` 同样需接入 `shared_proxy`（见 A 第 4 步）。TLS 正常但返回 **502** = 后端未启动或不在网络上。
+
+**6. 续期**：纳入统一续期 `./scripts/proxy.sh renew`（建议 cron / systemd timer）。
+
+> 持久化提示：`templates-enabled/` 是 gitignore 的本地运行态，模板的「源」建议放进你自己的业务项目（像 `hub` / `ap` 由项目侧复制进来），否则重装 proxy 会丢失。
+
 ## 自定义站点接入
 
 默认不会再启用前端/后端双站点配置。新增站点时，将对应模板追加到 `templates-enabled/`，在 `.env.proxy` 中提供模板变量，然后执行 `reload`。
@@ -201,19 +337,20 @@ ADMIN_UPSTREAM=myapp_admin:8080
 ### 2. 准备模板
 
 ```bash
-cd /path/to/dv/proxy
+cd <path-to-your-dv>/proxy
 
 # 可从示例开始，也可以直接写自己的模板。
 cp examples/frontend-backend/templates/05-upstreams.conf.template templates-enabled/
 cp examples/frontend-backend/templates/10-http.conf.template templates-enabled/
-./scripts/proxy.sh reload
+# 首次（nginx 尚未运行）用 up 启动并渲染；proxy 已在运行时改用 reload
+./scripts/proxy.sh up
 ```
 
 ### 3. 业务接入 `shared_proxy`（可选）
 
 ```bash
 docker compose -f docker-compose.yaml \
-  -f /path/to/dv/proxy/examples/p260507-network.override.yaml \
+  -f <path-to-your-dv>/proxy/examples/p260507-network.override.yaml \
   up -d --build
 ```
 
@@ -275,7 +412,7 @@ cp examples/frontend-backend/templates/20-https.conf.template templates-enabled/
 | 查看状态 | `ps` 或 `deploy-infra.sh ps proxy` |
 | 排查 | `logs` |
 | 停止 | `down` |
-| 改挂载或 compose 后 | `docker compose up -d --force-recreate nginx` 再 `reload` |
+| 改挂载或 compose 后 | `docker compose --env-file .env.proxy -f docker-compose.yaml up -d --force-recreate nginx` 再 `reload`（裸 `docker compose` 不会读 `.env.proxy`，会忽略 `HTTP_PORT`/`NGINX_IMAGE` 等插值） |
 
 ## 新项目接入
 
@@ -305,7 +442,7 @@ bash tests/proxy_template_behavior_test.sh
 
 - **`up` 与 `reload`**：日常改配置用 `reload`；`up` 只在没有启用模板时初始化 infra HTTP 模板，并在启动 nginx 前渲染当前模板。
 - **`issue-domain` 后仍无法 HTTPS**：须执行 `enable-https`（infra）或自行加入 HTTPS 模板后 `reload`；仅磁盘有证书不够。  
-- **`conf.d-enabled` 为空或 HTTPS 无响应**：确认已 `reload`；改 compose 挂载后需 `docker compose up -d --force-recreate nginx`。  
+- **`conf.d-enabled` 为空或 HTTPS 无响应**：确认已 `reload`；改 compose 挂载后需 `docker compose --env-file .env.proxy -f docker-compose.yaml up -d --force-recreate nginx`（必须带 `--env-file`，否则端口/镜像等插值回落默认值）。  
 - **502**：TLS 正常但 upstream 无进程（例如 store 端口未监听）。  
 - **80 端口**：webroot 需可访问 `http://<域名>/.well-known/acme-challenge/`。  
 - **`CERTBOT_STAGING=1`**：测试 CA，调试后改回 `0`。  
