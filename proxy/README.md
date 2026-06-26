@@ -85,6 +85,14 @@ cd proxy
 ./scripts/proxy.sh help
 ```
 
+可选安装证书自动续签 timer（默认不会安装，需显式执行）：
+
+```bash
+sudo ./scripts/install-renew-timer.sh install
+/usr/local/sbin/dv-proxy-renew.sh dry-run
+systemctl list-timers --all dv-proxy-renew.timer
+```
+
 可选环境变量：
 
 | 变量 | 说明 |
@@ -401,7 +409,27 @@ cp examples/frontend-backend/templates/20-https.conf.template templates-enabled/
 ./scripts/proxy.sh renew
 ```
 
-建议 cron / systemd timer 定期执行。续期不需改 `CERTBOT_DOMAINS`；`expand` 仅用于增加 SAN。
+建议用 systemd timer 定期执行。可选安装：
+
+```bash
+sudo ./scripts/install-renew-timer.sh install
+```
+
+安装后会创建：
+
+- `/usr/local/sbin/dv-proxy-renew.sh`
+- `/etc/systemd/system/dv-proxy-renew.service`
+- `/etc/systemd/system/dv-proxy-renew.timer`
+
+默认每天 `03:12` 与 `15:12` 触发，并设置 `RandomizedDelaySec=1h`。实际提前多久续签由 Certbot 的 renewal 配置控制；默认通常是到期前 30 天。
+
+手动验证续签链路：
+
+```bash
+/usr/local/sbin/dv-proxy-renew.sh dry-run
+```
+
+续期不需改 `CERTBOT_DOMAINS`；`expand` 仅用于增加 SAN。
 
 ## 日常运维
 
@@ -435,6 +463,7 @@ ADMIN_STORE_UPSTREAM=host.docker.internal:8090
 ```bash
 cd proxy
 bash tests/proxy_issue_domain_test.sh
+bash tests/proxy_renew_timer_test.sh
 bash tests/proxy_template_behavior_test.sh
 ```
 
