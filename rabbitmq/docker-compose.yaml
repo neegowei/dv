@@ -25,10 +25,17 @@ services:
       - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
       - "127.0.0.1:${RABBITMQ_MGMT_PORT:-15672}:15672"
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test:
+        - CMD
+        - /usr/bin/timeout
+        - "2"
+        - /usr/bin/bash
+        - -ec
+        - "exec 3<>/dev/tcp/127.0.0.1/5672"
       interval: 30s
-      timeout: 10s
+      timeout: 3s
       retries: 3
+      start_period: 30s
     networks:
       internal:
         aliases:
