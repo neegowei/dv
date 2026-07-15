@@ -4,6 +4,9 @@ networks:
   internal:
     name: ${MONITOR_NETWORK:-shared_monitor}
     external: true
+  rabbitmq:
+    name: ${RABBITMQ_NETWORK:-shared_rabbitmq}
+    external: true
 
 services:
   prometheus:
@@ -18,6 +21,7 @@ services:
         max-file: "3"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
       - ${PROMETHEUS_DATA_DIR:-/data/prometheus}:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -25,6 +29,7 @@ services:
       - --web.enable-lifecycle
     networks:
       - internal
+      - rabbitmq
 
   loki:
     image: ${LOKI_IMAGE:-grafana/loki:latest}

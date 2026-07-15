@@ -1,0 +1,38 @@
+groups:
+  - name: rabbitmq
+    rules:
+      - alert: RabbitMQMetricsUnavailable
+        expr: up{job="rabbitmq"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: RabbitMQ metrics endpoint is unavailable
+          description: Prometheus has been unable to scrape RabbitMQ metrics for more than two minutes.
+
+      - alert: RabbitMQMemoryAlarm
+        expr: rabbitmq_alarms_memory_used_watermark > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: RabbitMQ memory alarm is active
+          description: RabbitMQ has exceeded its configured memory high watermark for more than one minute.
+
+      - alert: RabbitMQDiskAlarm
+        expr: rabbitmq_alarms_free_disk_space_watermark > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: RabbitMQ disk alarm is active
+          description: RabbitMQ has less free disk space than its configured minimum for more than one minute.
+
+      - alert: RabbitMQFileDescriptorAlarm
+        expr: rabbitmq_alarms_file_descriptor_limit > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: RabbitMQ file descriptor alarm is active
+          description: RabbitMQ has reached its file descriptor limit for more than one minute.
