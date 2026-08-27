@@ -132,4 +132,4 @@ bash proxy/tests/proxy_issue_domain_test.sh       # 证书签发参数
 | `proxy/templates/` | 是 | 带 `${变量}` 的通用模板 |
 | `/data/letsencrypt` | 否（宿主机） | 证书私钥 |
 
-克隆本仓库后，在每台服务器上单独创建 `.env.*` 与运行态配置，不要 `git add -f` 忽略规则中的文件。
+克隆本仓库后，在每台服务器上单独创建 `.env.*` 与运行态配置，**不要** `git add -f` 忽略规则中的文件。
