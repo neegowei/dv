@@ -175,11 +175,6 @@ render_templates_on_host() {
   done
 }
 
-render_templates_in_nginx() {
-  render_templates_on_host
-  compose_cmd exec nginx nginx -t
-}
-
 reload_nginx() {
   render_templates_on_host
   compose_cmd exec nginx nginx -t

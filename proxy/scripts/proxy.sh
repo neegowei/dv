@@ -17,7 +17,7 @@ usage() {
   proxy.sh enable-https
                     启用基础设施 HTTPS 模板（一域一证）并 reload，不重新申请证书
   proxy.sh reload   重新渲染当前启用模板并 reload nginx
-  proxy.sh test     重新渲染当前启用模板并执行 nginx -t
+  proxy.sh test     仅对当前已生成配置执行 nginx -t，不重新渲染
   proxy.sh ps       查看 proxy services 状态
   proxy.sh logs     跟踪 nginx/certbot 日志
   proxy.sh down     停止 proxy services
@@ -189,7 +189,7 @@ case "$cmd" in
         ;;
     test)
         ensure_env_file
-        render_templates_in_nginx
+        compose_cmd exec nginx nginx -t
         ;;
     ps)
         ensure_env_file

@@ -20,7 +20,7 @@
 templates/              # 仓库内可版本化的 infra 模板（${DOMAIN_*} 占位符）
     ↓  proxy.sh up / enable-https 复制；自定义站点手动追加
 templates-enabled/      # 当前启用的模板（gitignore，在服务器维护）
-    ↓  proxy.sh reload / test（宿主机 envsubst，读取 .env.proxy）
+    ↓  proxy.sh reload（宿主机 envsubst，读取 .env.proxy）
 conf.d-enabled/         # 渲染后的 nginx 配置（gitignore）
     ↓  docker-compose 挂载
 容器 /etc/nginx/conf.d/
@@ -78,12 +78,14 @@ cd proxy
 ./scripts/proxy.sh expand          # 按 CERTBOT_DOMAINS 扩展已有证书并 reload
 ./scripts/proxy.sh renew           # 续期全部证书并 reload
 ./scripts/proxy.sh reload          # 宿主机渲染 templates-enabled → conf.d-enabled 并 reload
-./scripts/proxy.sh test            # 渲染并 nginx -t
+./scripts/proxy.sh test            # 仅 nginx -t，校验已生成配置，不重新渲染
 ./scripts/proxy.sh ps
 ./scripts/proxy.sh logs
 ./scripts/proxy.sh down
 ./scripts/proxy.sh help
 ```
+
+`test` 不修改 `conf.d-enabled/`，也不验证尚未渲染的模板变更。修改模板或 `.env.proxy` 后使用 `reload`，它会依次渲染、校验并发送重载信号。Nginx 重载是异步的；重载后的检查不得删除或重新生成配置，以免 Nginx 读取到中间状态。`nginx -t` 只校验磁盘配置，重载后还应检查实际 HTTPS 响应。
 
 可选安装证书自动续签 timer（默认不会安装，需显式执行）：
 
@@ -435,7 +437,7 @@ sudo ./scripts/install-renew-timer.sh install
 
 | 场景 | 命令 |
 |------|------|
-| 改 `.env.proxy` 或 `templates-enabled/` | `test` → `reload` |
+| 改 `.env.proxy` 或 `templates-enabled/` | `reload`（含渲染与校验）→ 检查实际 HTTPS 响应 |
 | 仅基础设施启用 HTTPS | `enable-https` |
 | 查看状态 | `ps` 或 `deploy-infra.sh ps proxy` |
 | 排查 | `logs` |

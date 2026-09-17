@@ -31,6 +31,9 @@ if [[ "${1:-}" == "network" && "${2:-}" == "inspect" ]]; then
 fi
 
 printf '%s\n' "$*" >>"$DOCKER_CALLS"
+if [[ "$*" == *"exec nginx nginx -t" ]]; then
+    exit "${NGINX_TEST_STATUS:-0}"
+fi
 exit 0
 FAKE_DOCKER
 chmod +x "$FAKE_BIN/docker"
@@ -246,6 +249,35 @@ TPL
     assert_file_contains "$CONF_DIR/90-amb.conf" "proxy_pass http://app:8080;"
 }
 
+test_test_preserves_rendered_config() {
+    local env_file="$TMP_DIR/test.env"
+    local expected_dir="$TMP_DIR/expected-conf"
+    local status
+
+    reset_runtime_dirs
+    write_env "$env_file" "CUSTOM_DOMAIN=new.example.test"
+    echo '# active HTTPS config' >"$CONF_DIR/60-https.conf"
+    echo '# changed template' >"$ENABLED_DIR/60-https.conf.template"
+    echo '# new template' >"$ENABLED_DIR/90-new.conf.template"
+    cp -a "$CONF_DIR" "$expected_dir"
+
+    PROXY_ENV_FILE="$env_file" "$ROOT/scripts/proxy.sh" test >/dev/null
+
+    diff -ru "$expected_dir" "$CONF_DIR"
+    [[ "$(wc -l <"$DOCKER_CALLS")" -eq 1 ]]
+    assert_file_contains "$DOCKER_CALLS" "exec nginx nginx -t"
+
+    if NGINX_TEST_STATUS=1 PROXY_ENV_FILE="$env_file" "$ROOT/scripts/proxy.sh" test >/dev/null; then
+        echo "expected proxy.sh test to propagate nginx validation failure" >&2
+        exit 1
+    else
+        status=$?
+    fi
+    [[ "$status" -eq 1 ]]
+    diff -ru "$expected_dir" "$CONF_DIR"
+}
+
+test_test_preserves_rendered_config
 test_render_scans_custom_template_variables
 test_up_preserves_existing_enabled_templates
 test_issue_requires_certbot_domains_without_legacy_fallback
