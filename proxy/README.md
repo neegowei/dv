@@ -44,6 +44,7 @@ conf.d-enabled/         # 渲染后的 nginx 配置（gitignore）
 | `scripts/lib-proxy.sh` | 是 | compose、模板复制、宿主机渲染 |
 | `tests/proxy_issue_domain_test.sh` | 是 | `issue-domain` 行为回归测试 |
 | `tests/proxy_template_behavior_test.sh` | 是 | 模板渲染与 `issue` / `up` 行为回归测试 |
+| `tests/proxy_renew_behavior_test.sh` | 是 | 续期触发条件、配置保留与失败传播回归测试 |
 | `examples/p260507-network.override.yaml` | 是 | 项目接入 `shared_proxy` 的示例 |
 | `examples/frontend-backend/templates/` | 是 | 旧前端/后端双站点模板示例 |
 
@@ -76,7 +77,7 @@ cd proxy
                                    # 单域名证书；不切换 HTTPS 模板
 ./scripts/proxy.sh enable-https    # 基础设施三域名：启用 infra HTTPS 模板并 reload
 ./scripts/proxy.sh expand          # 按 CERTBOT_DOMAINS 扩展已有证书并 reload
-./scripts/proxy.sh renew           # 续期全部证书并 reload
+./scripts/proxy.sh renew           # 仅实际续期成功后校验并 reload；不重新渲染配置
 ./scripts/proxy.sh reload          # 宿主机渲染 templates-enabled → conf.d-enabled 并 reload
 ./scripts/proxy.sh test            # 仅 nginx -t，校验已生成配置，不重新渲染
 ./scripts/proxy.sh ps
@@ -411,6 +412,15 @@ cp examples/frontend-backend/templates/20-https.conf.template templates-enabled/
 ./scripts/proxy.sh renew
 ```
 
+`renew` 只负责证书续期，不重新渲染 `templates-enabled/`，也不修改 `conf.d-enabled/`。模板或 `.env.proxy` 的变更仍通过显式 `reload` 发布。
+
+- 没有证书需要续期，或所有续期都失败：不执行 Nginx 校验或 reload。
+- 至少一张证书成功续期：通过 Certbot 的 `--deploy-hook` 记录成功更新，续期结束后只执行一次 `nginx -t` 和一次平滑 reload。
+- 部分证书续期成功、部分失败：加载已成功更新的证书，同时保留 Certbot 的失败退出码，供定时任务报告失败。
+- Nginx 校验失败：不发送 reload 信号并返回失败；reload 命令失败也向调用者返回失败。
+
+当前 Nginx 模板通过固定文件路径加载证书。文件更新后，已运行的 Nginx 不会自动使用新证书，因此成功续期后仍需 reload。reload 会重新读取磁盘上的现有 Nginx 配置和证书；`conf.d-enabled/` 应保持为已批准的当前配置。仅执行 `certbot renew` 返回成功，不能判断是否真的更新了证书。行为依据见 [Certbot 续期与 hook 文档](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates) 和 [Nginx 配置重载文档](https://nginx.org/en/docs/control.html#reconfiguration)。
+
 建议用 systemd timer 定期执行。可选安装：
 
 ```bash
@@ -430,6 +440,10 @@ sudo ./scripts/install-renew-timer.sh install
 ```bash
 /usr/local/sbin/dv-proxy-renew.sh dry-run
 ```
+
+`dry-run` 验证 ACME 续期链路和当前 Nginx 配置，不重新渲染模板或 reload，也不覆盖正式证书。它不验证真实续期后新证书的加载；实际续期后还应核对公网提供的证书。
+
+已有 timer 会调用当前仓库的 `scripts/proxy.sh renew`，更新该脚本即可采用新的续期行为。重新执行安装命令还会更新 `/usr/local/sbin/dv-proxy-renew.sh`，去除旧包装脚本在 `renew` 后的重复 Nginx 校验。
 
 续期不需改 `CERTBOT_DOMAINS`；`expand` 仅用于增加 SAN。
 
@@ -466,8 +480,11 @@ ADMIN_STORE_UPSTREAM=host.docker.internal:8090
 cd proxy
 bash tests/proxy_issue_domain_test.sh
 bash tests/proxy_renew_timer_test.sh
+bash tests/proxy_renew_behavior_test.sh
 bash tests/proxy_template_behavior_test.sh
 ```
+
+上述回归测试使用隔离临时目录和模拟 Docker / systemd 命令，不访问 ACME 或修改实际代理配置。续期行为测试覆盖未更新、多证书更新、全部失败、部分失败、Nginx 校验与 reload 失败，以及所有分支的临时目录清理。
 
 ## 常见问题
 

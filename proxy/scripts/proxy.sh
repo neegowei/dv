@@ -13,7 +13,7 @@ usage() {
   proxy.sh issue-domain <domain>
                     为单个域名单独申请证书，证书名同域名；不会切换 HTTPS 配置
   proxy.sh expand   使用 CERTBOT_DOMAINS 扩展已有证书，成功后 reload nginx
-  proxy.sh renew    续期证书，成功后 reload nginx
+  proxy.sh renew    续期证书；仅实际更新后 reload nginx，不重新渲染配置
   proxy.sh enable-https
                     启用基础设施 HTTPS 模板（一域一证）并 reload，不重新申请证书
   proxy.sh reload   重新渲染当前启用模板并 reload nginx
@@ -173,8 +173,24 @@ case "$cmd" in
         ;;
     renew)
         ensure_env_file
-        compose_cmd run --rm certbot renew --webroot -w /var/www/certbot
-        reload_nginx
+        (
+            renew_hook_dir="$(mktemp -d)"
+            trap 'rm -rf "$renew_hook_dir"' EXIT
+            renew_status=0
+
+            # The hook runs inside Certbot; a shared marker reports successful renewals.
+            compose_cmd run --rm --volume "$renew_hook_dir:/run/dv-proxy-renew" \
+                certbot renew --webroot -w /var/www/certbot \
+                --deploy-hook 'touch /run/dv-proxy-renew/renewed' || renew_status=$?
+
+            if [[ -f "$renew_hook_dir/renewed" ]]; then
+                compose_cmd exec nginx nginx -t
+                compose_cmd exec nginx nginx -s reload
+            else
+                echo "没有成功更新的证书，跳过 Nginx reload。"
+            fi
+            exit "$renew_status"
+        )
         ;;
     enable-https)
         ensure_env_file

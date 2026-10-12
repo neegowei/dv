@@ -56,3 +56,28 @@ assert_file_contains "$SYSTEMD_DIR/dv-proxy-renew.timer" "RandomizedDelaySec=1h"
 assert_file_contains "$SYSTEMD_DIR/dv-proxy-renew.timer" "Persistent=true"
 assert_file_contains "$SYSTEMCTL_CALLS" "daemon-reload"
 assert_file_contains "$SYSTEMCTL_CALLS" "enable --now dv-proxy-renew.timer"
+
+runtime_dir="$TMP_DIR/proxy-runtime"
+mkdir -p "$runtime_dir/scripts"
+cat >"$runtime_dir/scripts/proxy.sh" <<'FAKE_PROXY'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$PROXY_CALLS"
+exit "${PROXY_STATUS:-0}"
+FAKE_PROXY
+chmod +x "$runtime_dir/scripts/proxy.sh"
+export PROXY_CALLS="$TMP_DIR/proxy-calls.log"
+
+PROXY_DIR="$runtime_dir" PROXY_ENV_FILE="$env_file" \
+    PROXY_COMPOSE_FILE="$ROOT/docker-compose.yaml" \
+    "$SBIN_DIR/dv-proxy-renew.sh" renew >/dev/null
+[[ "$(cat "$PROXY_CALLS")" == renew ]]
+
+if PROXY_STATUS=6 PROXY_DIR="$runtime_dir" PROXY_ENV_FILE="$env_file" \
+    PROXY_COMPOSE_FILE="$ROOT/docker-compose.yaml" \
+    "$SBIN_DIR/dv-proxy-renew.sh" renew >/dev/null; then
+    echo "expected renewal wrapper to propagate proxy.sh failure" >&2
+    exit 1
+else
+    [[ "$?" -eq 6 ]]
+fi

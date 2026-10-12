@@ -68,7 +68,6 @@ case "\${1:-renew}" in
     renew)
         log "starting certificate renewal through dv/proxy"
         PROXY_ENV_FILE="\$ENV_FILE" PROXY_COMPOSE_FILE="\$COMPOSE_FILE" ./scripts/proxy.sh renew
-        PROXY_ENV_FILE="\$ENV_FILE" PROXY_COMPOSE_FILE="\$COMPOSE_FILE" ./scripts/proxy.sh test
         log "certificate renewal finished"
         ;;
     dry-run)
